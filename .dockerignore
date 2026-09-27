@@ -3,7 +3,8 @@ DATA*
 RELEASE
 yacy.log
 classes
-test
+test/*
+!test/jetty
 snap
 examples
 build.nsi

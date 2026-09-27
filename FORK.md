@@ -13,7 +13,7 @@ upstream とフォークの閉じた P2P 網（各 3 ノード）を docker comp
 
 | # | 症状 | 原因 | 修正 | コミット |
 |---|---|---|---|---|
-| 1 | 1 語だけ一致する頁（キーワード詰め込み頁）が上位に来る | 2 語以上のクエリに Solr の `mm=1`（OR）を付けていた。remote ピアにも同じクエリが送られる | `search.ranking.solr.mm`（既定 `3<-1 5<80%`）と `search.ranking.solr.mm.cjk`（既定 `100%`）で設定可能に。title へのフレーズ boost を追加 | Require all query terms in Solr by default |
+| 1 | 1 語だけ一致する頁（キーワード詰め込み頁）が上位に来る | 2 語以上のクエリに Solr の `mm=1`（OR）を付けていた。remote ピアにも同じクエリが送られる | `search.ranking.solr.mm` / `search.ranking.solr.mm.cjk`（既定とも `2<-1 5<80%`: 2 語は両方必須、3〜5 語は 1 語の欠けを許す）で設定可能に。title へのフレーズ boost を追加 | Require all query terms in Solr by default |
 | 2 | 1 語一致しか持たないピアの 1 位が、他ピアの完全一致と同じ順位になる | ピアごとに Solr スコアを最高点で割って 0〜1 に正規化している | 正規化後のスコアに「見つかったクエリ語 / 全クエリ語」の 2 乗を掛ける（`search.ranking.coverage.exponent`） | Weight Solr results by query term coverage |
 | 3 | 日本語・中国語が単語索引（RWI）で引けない | 空白と句読点でしか区切らず、「暗号資産交換業者の登録について」全体が 1 語になる | CJK の連続を重なりのある 2 文字（bigram）に分ける。クエリ側も同じ規則で分ける | Index and search CJK text as overlapping bigrams |
 | 4 | Solr で漢字・かなが 1 文字ずつの token になる | `text_general` が StandardTokenizer のみ | `CJKWidthFilter` + `CJKBigramFilter` を追加 | 同上 |

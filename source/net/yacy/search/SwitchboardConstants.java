@@ -712,10 +712,10 @@ public final class SwitchboardConstants {
      * Upstream used "1", which turns every multi-term query into an OR query.
      */
     public static final String SEARCH_RANKING_SOLR_MM = "search.ranking.solr.mm";
-    public static final String SEARCH_RANKING_SOLR_MM_DEFAULT = "3<-1 5<80%";
-    /** minimum match for queries containing Chinese, Japanese or Korean terms */
+    public static final String SEARCH_RANKING_SOLR_MM_DEFAULT = "2<-1 5<80%";
+    /** minimum match for queries containing Chinese, Japanese or Korean terms; each CJK term is sent as a phrase of bigrams */
     public static final String SEARCH_RANKING_SOLR_MM_CJK = "search.ranking.solr.mm.cjk";
-    public static final String SEARCH_RANKING_SOLR_MM_CJK_DEFAULT = "100%";
+    public static final String SEARCH_RANKING_SOLR_MM_CJK_DEFAULT = "2<-1 5<80%";
     /**
      * Solr results are multiplied by (matched query terms / all query terms) ^ exponent, where a term matches if it
      * appears in the title, URL, description, keywords or the highlighted snippets. 0 switches this off.

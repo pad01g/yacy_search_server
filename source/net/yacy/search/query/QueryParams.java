@@ -689,8 +689,7 @@ public final class QueryParams {
     /**
      * The Solr minimum match (edismax mm) for a query with more than one term. Remote peers receive this value
      * with the query, so the configuration of the searching peer applies to the whole network search.
-     * CJK queries get their own value: their terms are split into many short tokens, and a partial match of
-     * those is nearly always a false hit.
+     * CJK queries have their own setting because their terms are matched as phrases of bigrams.
      */
     static String minimumMatch(final QueryGoal goal) {
         final Switchboard sb = Switchboard.getSwitchboard();

@@ -56,7 +56,7 @@ public class QueryGoalCJKTest {
     @Test
     public void testMinimumMatch() {
         // without a running Switchboard the defaults apply
-        assertEquals("3<-1 5<80%", QueryParams.minimumMatch(new QueryGoal("tokio select cancellation safety")));
-        assertEquals("100%", QueryParams.minimumMatch(new QueryGoal("ステーブルコイン 規制")));
+        assertEquals("2<-1 5<80%", QueryParams.minimumMatch(new QueryGoal("tokio select cancellation safety")));
+        assertEquals("2<-1 5<80%", QueryParams.minimumMatch(new QueryGoal("ステーブルコイン 規制")));
     }
 }

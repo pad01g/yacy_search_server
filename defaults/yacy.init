@@ -1185,10 +1185,11 @@ search.ranking.rwi.profile =
 
 # Solr minimum match (edismax mm) for queries with more than one term.
 # The value is sent along with remote Solr searches, so the searching peer decides.
-# "3<-1 5<80%": up to 3 terms all must match, 4-5 terms all but one, more than 5 terms 80%.
-search.ranking.solr.mm = 3<-1 5<80%
+# "2<-1 5<80%": two terms must both match, 3-5 terms all but one, more than 5 terms 80%.
+# Documents with all terms still rank first because of search.ranking.coverage.exponent.
+search.ranking.solr.mm = 2<-1 5<80%
 # minimum match for queries with Chinese, Japanese or Korean terms
-search.ranking.solr.mm.cjk = 100%
+search.ranking.solr.mm.cjk = 2<-1 5<80%
 # Solr results are multiplied by (matched query terms / all query terms) ^ exponent, counting
 # a term if it appears in title, url, description, keywords or highlighted snippets. 0 = off
 search.ranking.coverage.exponent = 2

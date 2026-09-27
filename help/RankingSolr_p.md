@@ -48,8 +48,8 @@ These keys are set in `defaults/yacy.init` and can be changed with `/ConfigPrope
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `search.ranking.solr.mm` | `3<-1 5<80%` | edismax minimum match for queries with more than one term: up to 3 terms all must match, 4-5 terms all but one, more terms 80%. `1` makes every multi-term query an OR query. |
-| `search.ranking.solr.mm.cjk` | `100%` | Minimum match for queries with Chinese, Japanese or Korean terms. |
+| `search.ranking.solr.mm` | `2<-1 5<80%` | edismax minimum match for queries with more than one term: two terms must both match, 3-5 terms all but one, more terms 80%. Documents with all terms still rank first because of the coverage weighting below. `1` makes every multi-term query an OR query. |
+| `search.ranking.solr.mm.cjk` | `2<-1 5<80%` | Minimum match for queries with Chinese, Japanese or Korean terms. Each CJK term is matched as a phrase of bigrams. |
 | `search.ranking.coverage.exponent` | `2` | Solr results are weighted by (query terms found in title, URL, description, keywords or highlighted snippets / all query terms) to this power, after each peer's scores are normalized. `0` switches the weighting off. |
 | `remotesearch.dht.minage` | `3` | Minimum age in days of a peer to be asked in a remote word index (DHT) search. |
 

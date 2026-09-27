@@ -1,5 +1,7 @@
 # pad01g/yacy_search_server: 検索品質の改善フォーク
 
+プロジェクトの説明: https://pad01g.github.io/yacy_search_server/ （English / [日本語](https://pad01g.github.io/yacy_search_server/ja/)）
+
 [yacy/yacy_search_server](https://github.com/yacy/yacy_search_server) master `b50b76b` からの派生。
 変更はすべて branch `improved-search` にある。効果は [pad01g/yacy-lab](https://github.com/pad01g/yacy-lab) で
 docker compose の閉じた P2P 網を立てて測っている（検索品質: upstream とフォーク各 3 ノード / 信頼と NAT 越え: 8 ピア + リレー + NAT）。

@@ -721,6 +721,9 @@ public final class SwitchboardConstants {
      * appears in the title, URL, description, keywords or the highlighted snippets. 0 switches this off.
      */
     public static final String SEARCH_RANKING_COVERAGE_EXPONENT = "search.ranking.coverage.exponent";
+    /** boost (edismax bq) of the whole query as a phrase in the title; 0 switches it off */
+    public static final String SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST = "search.ranking.solr.titlePhraseBoost";
+    public static final float SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT = 20f;
     public static final int SEARCH_RANKING_COVERAGE_EXPONENT_DEFAULT = 2;
 
     /**

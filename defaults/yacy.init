@@ -1220,6 +1220,8 @@ search.ranking.solr.mm.cjk = 2<-1 5<80%
 # Solr results are multiplied by (matched query terms / all query terms) ^ exponent, counting
 # a term if it appears in title, url, description, keywords or highlighted snippets. 0 = off
 search.ranking.coverage.exponent = 2
+# boost of the whole query as a phrase in the title (sent to remote peers with the query). 0 = off
+search.ranking.solr.titlePhraseBoost = 20
 
 # The boost fields contains all fields which shall be searched together with a boost. non-mentioned fields are not searched.
 

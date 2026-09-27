@@ -669,7 +669,8 @@ public final class QueryParams {
             // add boost on combined words, strongest when the whole query appears as a phrase in the title
             if (bq.length() > 0) bq += "\n";
             bq += CollectionSchema.text_t.getSolrFieldName() + ":\"" + this.queryGoal.getIncludeString() + "\"^10";
-            bq += "\n" + CollectionSchema.title.getSolrFieldName() + ":\"" + this.queryGoal.getIncludeString() + "\"^20";
+            final String titleBoost = titlePhraseBoost();
+            if (titleBoost != null) bq += "\n" + CollectionSchema.title.getSolrFieldName() + ":\"" + this.queryGoal.getIncludeString() + "\"^" + titleBoost;
         }
         if (fq.length() > 0) {
             String[] oldfq = params.getFilterQueries();
@@ -714,6 +715,15 @@ public final class QueryParams {
         final String dflt = cjk ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK_DEFAULT : SwitchboardConstants.SEARCH_RANKING_SOLR_MM_DEFAULT;
         final String value = sb == null ? dflt : sb.getConfig(key, dflt).trim();
         return value.isEmpty() ? dflt : value; // an empty mm makes Solr reject the query
+    }
+
+    /** @return the boost of the whole query as a phrase in the title, or null if it is switched off */
+    static String titlePhraseBoost() {
+        final Switchboard sb = Switchboard.getSwitchboard();
+        final float b = sb == null ? SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT
+                : sb.getConfigFloat(SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST, SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT);
+        if (!(b > 0f) || Float.isInfinite(b)) return null;
+        return Float.toString(Math.min(b, 1000f));
     }
 
     private SolrQuery solrImageQuery(final boolean getFacets, final boolean strictContentDom) {

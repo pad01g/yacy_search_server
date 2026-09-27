@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YaCy improved-search</title>
+<meta name="description" content="An experimental YaCy fork: stricter and fairer ranking, CJK search, signed peers and documents, coordinator trust lists and NAT traversal through a libp2p relay, measured in reproducible docker compose networks.">
+<link rel="alternate" hreflang="ja" href="ja/">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <a class="brand" href="./">YaCy improved-search</a>
+  <nav>
+    <a href="./" aria-current="page">Overview</a>
+    <a href="design.html">Trust &amp; NAT design</a>
+    <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">Code</a>
+    <a href="https://github.com/pad01g/yacy-lab">Lab</a>
+  </nav>
+  <a class="lang" href="ja/" hreflang="ja" lang="ja">日本語</a>
+</div></div>
+
+<main>
+<header class="hero">
+  <h1>An experimental YaCy fork: better ranking, signed results, peers behind NAT</h1>
+  <p class="lead">A fork of <a href="https://github.com/yacy/yacy_search_server">YaCy</a> that fixes weaknesses measured on the public network, adds a trust layer so that forged and spam results can be filtered, and lets peers behind a NAT take part through a relay. Every claim on this page is measured in closed peer-to-peer networks that anyone can rebuild with docker compose.</p>
+  <div class="buttons">
+    <a class="button" href="#try">Try the demo</a>
+    <a class="button secondary" href="#results">See the results</a>
+    <a class="button secondary" href="design.html">Read the design</a>
+  </div>
+</header>
+
+<div class="note">
+  <p><strong>Status: experiment.</strong> This is not a release of the YaCy project and is not affiliated with it. It deliberately breaks compatibility with the public YaCy network (peer ids, seeds, CJK word hashes). It is shared to show what the changes do, with data, so that the ideas can be discussed and, where they fit, proposed upstream in small pieces.</p>
+</div>
+
+<h2 id="why">Why</h2>
+<p>Measured on the public YaCy network (freeworld) with 16 queries, only <strong>11%</strong> of the top 10 results contained all query terms. Looking into the causes:</p>
+<ul>
+  <li>Multi-term queries were sent to Solr with minimum match 1 (an OR query), to the own index and to every remote peer.</li>
+  <li>Each peer's Solr scores are normalized to its best hit, so a peer that only has one-term matches puts its best one level with other peers' exact matches.</li>
+  <li>Japanese and Chinese text is only split at spaces and punctuation, so a whole sentence becomes one "word" and the word index (RWI) cannot find it.</li>
+  <li>In a network of new peers, peers younger than 3 days are never asked in a word index search, and small network definitions send remote Solr queries to nobody.</li>
+  <li>Results carry no proof of origin. A peer can return any URL with any title for any query, and seeds can be replayed or altered by third parties.</li>
+  <li>Peers behind a NAT can only be "junior": they cannot be reached, so what they index is invisible to others.</li>
+</ul>
+
+<h2 id="changes">What changed</h2>
+<div class="cards">
+  <div class="card"><h3>Ranking</h3><p>Stricter minimum match, term coverage weighting after per-peer normalization, a weight against thin pages, and searching all peers of small networks.</p></div>
+  <div class="card"><h3>CJK</h3><p>Chinese, Japanese and Korean text is indexed and searched as overlapping bigrams, in Solr and in the word index.</p></div>
+  <div class="card"><h3>Trust</h3><p>Ed25519 peer keys, signed seeds, coordinator-signed trust lists with declared tags, and an author signature on every document.</p></div>
+  <div class="card"><h3>NAT traversal</h3><p>A small go-libp2p sidecar reserves a slot on a circuit relay, so peers behind a NAT answer searches.</p></div>
+</div>
+
+<h3>Search quality</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Symptom</th><th>Cause</th><th>Change</th></tr></thead>
+<tbody>
+<tr><td>Pages that match one term (keyword stuffing) rank on top</td><td>Solr <code>mm=1</code> for multi-term queries</td><td>Minimum match <code>2&lt;-1 5&lt;80%</code>: two terms must both match, 3–5 terms may miss one (<code>search.ranking.solr.mm</code>, <code>.mm.cjk</code>)</td></tr>
+<tr><td>A peer's best partial match ranks like other peers' exact matches</td><td>Per-peer score normalization</td><td>Multiply the normalized score by (terms found / query terms)² (<code>search.ranking.coverage.exponent</code>)</td></tr>
+<tr><td>Japanese / Chinese not found in the word index</td><td>No word segmentation for CJK</td><td>Overlapping bigrams in the word index and the query; <code>CJKWidthFilter</code> + <code>CJKBigramFilter</code> in the Solr schema</td></tr>
+<tr><td>Thin pages with the whole query in the title (tag lists) rank on top</td><td><code>qf</code> weighs title^15 and h1^11 against text^1</td><td>Results with fewer than 100 words are weighted by words / 100 (<code>search.ranking.thin.words</code>); CJK word counts fixed (they counted spaces)</td></tr>
+<tr><td>A network of new peers never searches other peers' word indexes</td><td>DHT search needs peers older than 3 days</td><td>Configurable (<code>remotesearch.dht.minage</code>, default 3)</td></tr>
+<tr><td>Small networks send remote Solr queries to nobody, or skip DHT targets</td><td>Target count formula gives 0; DHT targets were excluded from Solr</td><td>Networks of up to 32 peers ask every connected peer, DHT targets included</td></tr>
+</tbody></table></div>
+
+<h3>Trust layer</h3>
+<ul>
+  <li><strong>Peer identity.</strong> Each peer has an Ed25519 key. Its 12-character peer hash is derived from the public key, and the core of its seed (name, ports, key, reachability, declared tags) is signed. Unsigned seeds are rejected by default. A hello challenge proves that the key owner answers at an address.</li>
+  <li><strong>Trust lists.</strong> Users configure coordinator keys. A coordinator delegates to operators, and operators sign lists of trusted peers with a priority and declared tags such as <code>ads</code> or <code>proxy:&lt;engine&gt;</code>. Lists are versioned instead of expiring and spread from peer to peer.</li>
+  <li><strong>Author signatures.</strong> The peer that crawls a page signs its URL, title and a Bloom filter of its words. By default a result is shown only if its signature is valid and its author is in the trust set. A peer storing a document for the DHT cannot forge it. It can only withhold it.</li>
+  <li><strong>Open mode.</strong> Unsigned or untrusted results can be shown, labelled "unverified" and always ranked below verified ones. Results with a forged signature are never shown.</li>
+</ul>
+
+<h3>NAT traversal</h3>
+<p>A sidecar process (Go, go-libp2p) runs next to YaCy with the same key. Behind a NAT it reserves a slot on a circuit relay v2 and announces the circuit address in the signed seed (<code>Reach=relay</code>). Other peers open a local tunnel port to it and use plain HTTP, so YaCy's existing clients work unchanged. By default such peers only answer searches. They do not store DHT data unless they opt in.</p>
+<p>See the <a href="design.html">trust and NAT design</a> for the details.</p>
+
+<h2 id="results">Results</h2>
+<p>Two experiments in <a href="https://github.com/pad01g/yacy-lab">yacy-lab</a>. Both run closed networks in docker compose, with a deterministic corpus and query set.</p>
+
+<h3>Search quality: upstream vs fork, 3 peers each</h3>
+<p>Each peer crawls one site. Queries go to peer 1 with <code>resource=global</code>, and most relevant pages are on the other peers. The corpus contains two kinds of decoys: pages stuffed with one query term, and thin "tag archive" pages with the whole query in the title. Mean over 11 queries (6 English, 4 Japanese, 1 Chinese), 2 runs with the same result except where noted.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Cluster / path</th><th class="num">R-precision ↑</th><th class="num">Recall@10 ↑</th><th class="num">Decoys in top R ↓</th><th class="num">All terms in top 10 ↑</th></tr></thead>
+<tbody>
+<tr><td>upstream, default</td><td class="num">0.52</td><td class="num">0.96</td><td class="num">0.48</td><td class="num">0.42</td></tr>
+<tr class="fork"><td>fork, default</td><td class="num">0.84–0.88</td><td class="num">1.00</td><td class="num">0.12–0.16</td><td class="num">0.75</td></tr>
+<tr><td>upstream, word index only</td><td class="num">0.02</td><td class="num">0.02</td><td class="num">0.00</td><td class="num">0.09</td></tr>
+<tr class="fork"><td>fork, word index only</td><td class="num">0.93</td><td class="num">0.95</td><td class="num">0.07</td><td class="num">0.77</td></tr>
+</tbody></table></div>
+<ul>
+  <li>Keyword-stuffed pages in the top 5 (sum over the 11 queries): upstream <span class="bad">14</span>, fork <span class="good">0</span>.</li>
+  <li>Thin tag archive pages move down but stay in the top 5. Their average rank is 4.5 in the default search and 5.0 with the word index only. With Solr only it goes from 2.0 without the thin page weighting to 3.1 with it. They still rank above relevant pages that lack the query terms in their title. A stronger weighting would move them further down but would also demote legitimate short pages, so the default is kept mild.</li>
+  <li>Upstream cannot use other peers' word indexes in a network of new peers, and cannot find Japanese or Chinese words there at all.</li>
+  <li>The minimum match default was chosen on this corpus. Whether it is right for the public network still needs to be measured there.</li>
+</ul>
+
+<h3>Trust and NAT: 6 fork peers, a relay and a NAT</h3>
+<p>Three trusted peers, a trusted peer that declares <code>ads</code>, a signed but untrusted peer that crawls spam and plants documents with a borrowed signature, and a peer behind a MASQUERADE router. <strong>All 26 checks pass</strong>, among them:</p>
+<ul>
+  <li>Peer ids derive from the keys. The untrusted peer's spam is not shown by default, not even when a trusted peer holds a copy.</li>
+  <li>In open mode the spam appears labelled unverified and below every verified result. The document with a borrowed signature never appears.</li>
+  <li>Results of the <code>ads</code> peer carry the tag, and <code>excludeTags=ads</code> removes them.</li>
+  <li>The peer behind the NAT cannot be reached directly, but its pages are found through the relay, and it stays connected.</li>
+  <li>A new list version spreads by peer exchange alone. Revoking an operator removes its peers' results.</li>
+</ul>
+
+<h2 id="try">Try it</h2>
+<p>The demo starts both networks (3 upstream peers, and the fork's trust and NAT setup) on one machine and puts a search page in front of them. You need Docker with about 7&nbsp;GB of memory.</p>
+<pre><code>git clone https://github.com/pad01g/yacy_search_server.git yacy
+git clone https://github.com/pad01g/yacy-lab.git
+cd yacy
+git checkout baseline        &amp;&amp; docker build -t yacy-lab/upstream:baseline -f docker/Dockerfile .
+git checkout improved-search &amp;&amp; docker build -t yacy-lab/fork:latest -f docker/Dockerfile .
+docker build -t yacy-lab/sidecar:latest sidecar/
+cd ../yacy-lab
+docker compose -f compose.demo.yaml -p yacydemo up -d
+# open http://localhost:8800 (setup takes about 10 minutes and shows its progress)</code></pre>
+<figure>
+  <img src="assets/demo.png" alt="The demo page: the same query sent to the upstream network (left) and the fork (right). Upstream lists spam pages first; the fork lists verified relevant pages first and, in open mode, the spam below them labelled unverified." loading="lazy">
+  <figcaption>"bitcoin lightning channel" in open mode. Left: upstream shows spam first. Right: the fork shows verified results first and the spam, labelled unverified, below.</figcaption>
+</figure>
+<p>The experiments themselves: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code> (search quality) and <code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code> (trust and NAT). See the <a href="https://github.com/pad01g/yacy-lab#readme">lab README</a>.</p>
+
+<h2 id="limits">Limits</h2>
+<ul>
+  <li>Incompatible with the public YaCy network by default (unsigned seeds rejected, CJK word hashes changed). Open mode can search old peers, but only as unverified results.</li>
+  <li>Without configured coordinators a peer trusts only its own documents. Closed networks can use <code>trust.signedOnly=true</code>. A public network needs someone to act as coordinator.</li>
+  <li>The corpus is synthetic and small (160 pages). It reproduces the weaknesses found on the public network. It does not predict the size of the improvement there.</li>
+  <li>The NAT test uses one MASQUERADE router, not real home routers. Hole punching (DCUtR) is enabled but not measured.</li>
+  <li>A trusted author can still sign false content (tags and audit are the answer). A storing peer can still withhold results.</li>
+</ul>
+
+<h2 id="links">Links</h2>
+<ul>
+  <li>Code: <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">pad01g/yacy_search_server</a>, branch <code>improved-search</code> (changes listed in <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/FORK.md">FORK.md</a>)</li>
+  <li>Experiments and demo: <a href="https://github.com/pad01g/yacy-lab">pad01g/yacy-lab</a></li>
+  <li>Full design document (Japanese): <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/docs/trust-and-nat.md">docs/trust-and-nat.md</a></li>
+  <li>Upstream: <a href="https://github.com/yacy/yacy_search_server">yacy/yacy_search_server</a> · <a href="https://community.searchlab.eu/">YaCy forum</a></li>
+</ul>
+</main>
+<footer>YaCy is free software under the GPL. This fork keeps its licenses. Not affiliated with the YaCy project.</footer>
+</body>
+</html>

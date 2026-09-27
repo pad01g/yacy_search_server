@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信頼と NAT 越えの設計</title>
+<meta name="description" content="YaCy improved-search フォークで、ピアを Ed25519 の鍵に結び付け、seed と文書に署名し、コーディネータの信頼の一覧を配り、NAT の内側のピアに libp2p のリレーで届かせる仕組み。">
+<link rel="alternate" hreflang="en" href="../design.html">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <a class="brand" href="./">YaCy improved-search</a>
+  <nav>
+    <a href="./">概要</a>
+    <a href="design.html" aria-current="page">信頼と NAT 越えの設計</a>
+    <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">コード</a>
+    <a href="https://github.com/pad01g/yacy-lab">実験</a>
+  </nav>
+  <a class="lang" href="../design.html" hreflang="en" lang="en">English</a>
+</div></div>
+
+<main>
+<header class="hero">
+  <h1>信頼と NAT 越えの設計</h1>
+  <p class="lead">設計書 <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/docs/trust-and-nat.md">docs/trust-and-nat.md</a> の要約。細部はそちらが正。</p>
+</header>
+
+<h2 id="threats">1. 目的と脅威モデル</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>脅威</th><th>本家</th><th>この設計での扱い</th></tr></thead>
+<tbody>
+<tr><td>検索結果の捏造（どのクエリにも広告・マルウェアの URL を返す）</td><td>形式検査のみ。検証に失敗しても remote の結果は残る</td><td>結果の文書に<em>作者</em>（crawl したピア）の署名を求め、既定では作者がコーディネータの一覧に載っていることを求める</td></tr>
+<tr><td>他ピアの名を騙る、seed の改ざん</td><td>ピア ID は乱数。seed に署名なし</td><td>ピア ID = Ed25519 の鍵の hash。seed の中核に本人が署名し、hello のチャレンジで鍵の所有を確かめる</td></tr>
+<tr><td>偽ピアの大量生成（Sybil）</td><td>3 日待てば DHT 検索先になる</td><td>検索の信頼は一覧（入場管理）で決める。一覧に無いピアの文書は既定で使わない</td></tr>
+<tr><td>DHT の保存ピアによる改ざん</td><td>検出できない</td><td>保存ピアを信頼しなくてよい。作者の署名で改ざんが分かるので、できるのは返さないことだけ</td></tr>
+<tr><td>信頼されたピアが広告を混ぜる、外部エンジンを中継する</td><td>―</td><td>禁止しないが、一覧に宣言タグとして書かせ、利用者の方針で使うか決める</td></tr>
+</tbody></table></div>
+<p><strong>守らないもの:</strong> 保存ピアが結果を返さないこと、信頼された作者自身の虚偽（タグと監査で扱う）、検索語の秘匿。</p>
+
+<h2 id="identity">2. 身元</h2>
+<ul>
+  <li>ピアは起動時に <code>DATA/SETTINGS/peer.key</code>（Ed25519、PKCS#8 PEM）を読み、無ければ作る。</li>
+  <li>ピア hash（12 文字）= SHA-256(公開鍵) の URL-safe base64 の先頭 12 文字。DHT の隙間に合わせて ID を選ぶ本家の処理はやめ、鍵で決める。</li>
+  <li>同じ鍵を NAT 越えの sidecar の libp2p の鍵として使う。libp2p のピア ID（<code>12D3KooW…</code>）は公開鍵から計算できるので seed には載せない。</li>
+</ul>
+
+<h3>2.1 seed の署名</h3>
+<p>seed は受け取った側が IP・種別・フラグ・最終確認時刻などを書き換えて中継する。そこで本人しか決めない項目だけに署名する。</p>
+<div class="tablewrap"><table>
+<thead><tr><th>署名する中核</th><th>署名しない（観測値・受け手が書き換える）</th></tr></thead>
+<tbody><tr><td><code>Hash</code>, <code>PK</code>, <code>Name</code>, <code>Port</code>, <code>PortSSL</code>, <code>BDate</code>, <code>SigT</code>（署名時刻）, <code>Tags</code>（自己申告タグ）, <code>Reach</code>, <code>P2PA</code>, <code>RDS</code></td><td><code>IP</code>, <code>IP6</code>, <code>PeerType</code>, <code>Flags</code>, 各種カウンタ, <code>LastSeen</code>, <code>news</code>, <code>TV</code></td></tr></tbody>
+</table></div>
+<ul>
+  <li><code>Sig</code> = Ed25519（<code>"yacy-seed-v1\n" + "Hash=&lt;hash&gt;\n"</code> の後に、値のある残りの中核項目をキーの辞書順（<code>BDate, Name, P2PA, PK, Port, PortSSL, RDS, Reach, SigT, Tags</code>）に <code>k=v\n</code> で連結したもの）。</li>
+  <li><code>PK</code> のある seed は <code>Hash == H(PK)</code> と <code>Sig</code> が正しくなければ必ず拒否する。<code>PK</code> の無い seed は <code>trust.seed.acceptUnsigned=true</code> でない限り拒否する。</li>
+  <li>中核が変わったか前の署名から 7 日経ったら署名し直す。まだ知らないピアの seed は、<code>SigT</code> が 30 日より古いか 1 時間以上未来なら拒否する。署名付きで知っているピアの seed を、より古い seed や署名の無い seed で置き換えない。</li>
+</ul>
+
+<h3>2.2 hello のチャレンジ</h3>
+<p>IP は署名の対象外なので、その住所で本当に鍵の持ち主が応答しているかを hello で確かめる。</p>
+<ul>
+  <li>呼び出し側は乱数の <code>challenge</code> を送る。応答側は、要求が届いた相手のアドレス（<code>challengeFor</code>、sidecar 経由なら <code>p2p</code>）と <code>Sign("yacy-hello-v2|" + challenge + "|" + 自分の hash + "|" + challengeFor)</code> を返す。</li>
+  <li>呼び出し側は、返ってきた seed の <code>PK</code> で署名を検証し、<code>challengeFor</code> が自分のアドレスであることを確かめる。アドレスを含めるのは、攻撃者がチャレンジを本物のピアへ転送してその答えを返す攻撃を防ぐため。本物のピアは「攻撃者から来た要求」に署名するので見分けられる。</li>
+  <li>応答側が呼び出し元へ接続し直して到達性を確かめる back-ping でも同じチャレンジを使う。他人の IP を名乗った seed はこれで弾かれる。</li>
+  <li>自分の公開アドレスを知らないピア（junior、NAT の内側のピア）はアドレスの照合を省く。転送攻撃が残るのはこの場合だけ。</li>
+</ul>
+
+<h2 id="lists">3. 信頼の委譲と一覧</h2>
+<div class="diagram"><pre>コーディネータの鍵（利用者が設定。複数可、先頭ほど優先）
+  └─ 委任書: 「このオペレータの鍵に、この網の一覧を作らせる」（版付き。失効も新しい版で出す）
+       └─ ピアの一覧: 「これらのピアを、この優先度・このタグで信頼する」（オペレータが署名。版付き）</pre></div>
+<ul>
+  <li>委譲は 1 段だけ。コーディネータ自身がオペレータを兼ねてもよい。</li>
+  <li><strong>有効期限は持たず、版で管理する。</strong>運営者がいなくなっても最後の版で動き続ける。</li>
+  <li>すべて同じ形の封筒で運ぶ。署名は payload のバイト列そのものに対するので、JSON の正規化は要らない。</li>
+</ul>
+<pre><code>{"payload": "&lt;base64url(JSON のバイト列)&gt;", "signer": "&lt;base64url 公開鍵&gt;", "sig": "&lt;base64url 署名&gt;"}
+
+{"type": "yacy-delegation-v1", "network": "freeworld", "operator": "&lt;pk&gt;", "version": 3, "revoked": false}
+{"type": "yacy-peerlist-v1", "network": "freeworld", "version": 12,
+ "peers": [{"pk": "&lt;pk&gt;", "priority": 100, "tags": ["ads"]}]}</code></pre>
+<ul>
+  <li>委任書はコーディネータの署名が要る。（コーディネータ, オペレータ）ごとに最大の版を採り、<code>revoked:true</code> ならそのオペレータの一覧は無効になる。一覧は有効な委任を持つオペレータの署名が要り、オペレータごとに最大の版を採る。<code>network</code> は <code>network.unit.name</code> と一致するか <code>*</code>。</li>
+  <li>実効の信頼集合は、コーディネータの順に一覧を重ねたもの。同じピアは、先にそのピアを載せた一覧の優先度とタグを使う。照合は 72 bit のピア hash だけでなく公開鍵そのもので行う。</li>
+  <li><code>priority</code> は 0〜100。結果の点数に <code>0.5 + 0.5 × priority / 100</code> を掛ける。</li>
+  <li><strong>コーディネータが無いピアは自分の文書だけを信頼する</strong>（閉じる側に倒す）。全員を知っている閉じた網では <code>trust.signedOnly=true</code> で署名されたピアをすべて信頼できる。配布物は自分のコーディネータの鍵を既定値に入れて配る想定で、このフォーク自体は鍵を同梱しない。</li>
+</ul>
+
+<h3>3.1 宣言タグ</h3>
+<p>共通の最小語彙を決め、コーディネータは <code>x-&lt;name&gt;:</code> の接頭辞で独自のタグを足せる。</p>
+<div class="tablewrap"><table>
+<thead><tr><th>タグ</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>ads</code></td><td>結果に広告を混ぜる</td></tr>
+<tr><td><code>proxy:&lt;engine&gt;</code></td><td>外部の検索エンジンの結果を中継する</td></tr>
+<tr><td><code>curated</code></td><td>人手で選別した索引</td></tr>
+<tr><td><code>unfiltered</code></td><td>選別しない</td></tr>
+<tr><td><code>adult</code></td><td>成人向けの内容を含む</td></tr>
+</tbody></table></div>
+<p>一覧のタグが正。seed のタグは自己申告で、表示にだけ使う。<code>trust.policy.excludeTags</code> に当たる作者の文書は捨て、結果には作者のタグを付ける。</p>
+
+<h2 id="distribution">4. 一覧の配り方</h2>
+<ul>
+  <li>各ピアは受け取った封筒を検証して <code>DATA/SETTINGS/trust-bundle.json</code> に保存し、<code>/yacy/trust.json</code> で公開する。誰が中継してもよい。</li>
+  <li>seed に <code>TV</code> を載せる。コーディネータごとに、持っている封筒の版の<em>合計</em>（委任書と一覧。失効したオペレータの分も数える）。新しい封筒はどれも合計を増やし、失効でも合計は減らない。</li>
+  <li>peer ping のたびに、接続中のピアの <code>TV</code> が自分より大きければ、そのピアの <code>/yacy/trust.json</code> を取って統合する。<code>TV</code> は署名されていないので、問い合わせ先は乱数順に選び、新しいものを返さなかったピアには 10 分間問い合わせない。</li>
+  <li><code>trust.bundle.urls</code> からも、起動時・10 分ごと・設定が変わったときに取る。新しい版の存在を複数の経路で知ることで、古い版に留め置く攻撃をしにくくする。</li>
+</ul>
+
+<h2 id="provenance">5. 文書の出所（作者の署名）</h2>
+<ul>
+  <li>ピアは crawl した頁を索引するときに署名する。値は Solr の <code>provenance_s</code> に入り、DHT の転送や単語索引の結果ではプロパティ <code>prov</code> で運ばれる: <code>1|&lt;作者の鍵&gt;|&lt;署名&gt;|&lt;単語の Bloom フィルタ&gt;</code>。</li>
+  <li>署名の対象: <code>"yacy-doc-v1\n" + 正規化した URL + "\n" + タイトル + "\n" + Bloom</code>。Bloom フィルタには、単語索引に入るのと同じ、その文書の単語の hash を入れる。大きさは 1 語あたり 12 bit 以上の最小の 2 の冪（512〜32768 bit）、ハッシュ関数は 4 個。</li>
+</ul>
+<div class="tablewrap"><table>
+<thead><tr><th>判定</th><th>条件</th><th>既定の扱い</th></tr></thead>
+<tbody>
+<tr><td><code>SELF</code></td><td>作者が自ピア</td><td>使う</td></tr>
+<tr><td><code>TRUSTED</code></td><td>署名が正しく、作者が信頼集合にいる</td><td>使う。作者の優先度とタグを付ける</td></tr>
+<tr><td><code>SIGNED</code></td><td>署名は正しいが、作者が信頼集合にいない</td><td>捨てる（開放モードでは「未検証」）</td></tr>
+<tr><td><code>UNSIGNED</code></td><td>出所の署名が無い</td><td>捨てる（開放モードでは「未検証」）</td></tr>
+<tr><td><code>INVALID</code></td><td>署名が合わない、鍵と作者が合わない、URL かタイトルが変わっている</td><td><strong>必ず捨てる</strong></td></tr>
+</tbody></table></div>
+<ul>
+  <li>単語索引の結果は、クエリのすべての語が Bloom フィルタに入っていることも求める。保存ピアが信頼された文書を無関係な語に結び付けるのを防ぐため。</li>
+  <li>要約（snippet）・本文・説明・見出し・画像の代替テキストは署名の対象外。応答したピアが作者か、住所を確かめた信頼ピアのときだけ残す。他ピアの結果を自ピアの索引に保存する（<code>remotesearch.result.store</code>）のは、応答したピアが信頼された作者のときだけ。</li>
+  <li>DHT の保存（<code>transferURL</code>）は <code>INVALID</code> を拒否し、<code>UNSIGNED</code> は開放モードでだけ受け入れる。保存ピアは作者を信頼しなくてよい。</li>
+</ul>
+
+<h2 id="nat">6. NAT 越え</h2>
+<div class="diagram"><pre> NAT の内側                               公開側
+┌──────────────────────┐          ┌──────────────────┐          ┌──────────────────────┐
+│ YaCy ── sidecar ─────┼── 外向き ─▶ relay（sidecar）  ◀─ 外向き ─┼── sidecar ── YaCy    │
+│  :8090   :8095 /:4001│  予約    │  :4001           │  回線    │  :8095     :8090     │
+└──────────────────────┘          └──────────────────┘          └──────────────────────┘
+          ◀──────────────── DCUtR（穴あけ）で直結に切り替え（成功すれば）────────────────▶</pre></div>
+<ul>
+  <li><strong>sidecar</strong>（<code>sidecar/</code>、Go、go-libp2p）: YaCy と同じ鍵で libp2p のホストを立てる。外から届かなければ、設定された circuit relay v2 に予約を取り、DCUtR を試みる。</li>
+  <li><strong>トンネル。</strong>YaCy が制御 API に <code>GET /tunnel/&lt;libp2p ピア ID&gt;?addrs=…</code> を送ると、ローカルのポートが返る。<code>127.0.0.1:port</code> への普通の HTTP は、libp2p のストリーム（<code>/yacy/http/1.0.0</code>）で相手の sidecar へ運ばれる。普通のホスト:ポートなので、YaCy のプロトコルや Solr のクライアントはそのまま動く。</li>
+  <li>受け側の sidecar は <code>/yacy/*</code> と Solr の select だけを YaCy の専用の接続口（<code>127.0.0.1:8096</code>）へ渡す。管理画面は通さず、送信元を名乗るヘッダーは取り除く。接続口は送信元アドレスを libp2p のピア ID から作った <code>2001:db8::/32</code> のアドレスに置き換える。トンネル経由の要求にループバックの特権を与えず、負荷制限をピアごとに効かせるため。ピア ID のヘッダーは、sidecar のトークンが一緒に来たときだけ信じる。</li>
+  <li>制御 API は、YaCy が <code>DATA/SETTINGS/sidecar.token</code> に書いたトークン、ループバックの Host、<code>Origin</code> が無いことを求める（他のローカルのプロセスや DNS rebinding への対策）。上限はトンネル 256 本、15 分使われなければ閉じる、相手ごとの同時要求 8 本、1 要求 60 秒・32 MiB。</li>
+  <li>YaCy は、AutoNAT が「private」と判定したとき、または判定が出ないまま 3 回続けて他ピアから junior と報告されたとき、seed を <code>Reach=relay</code> にして回線のアドレスを <code>P2PA</code> に載せる。AutoNAT が「public」と判定するまでその状態を保つ。<code>p2p.mode=leecher</code> は <code>Reach=none</code>。</li>
+  <li>リレー経由のピアは既定で検索に応答するだけ。<code>p2p.relay.dhtStorage=true</code>（seed の <code>RDS=1</code>）を宣言しない限り、DHT の保存先にも DHT 検索先にもならない。</li>
+  <li>sidecar 経由の hello は、seed の鍵の libp2p の身元から来ていなければならない。向きはどちらでもよい。NAT の内側のピアがリレー経由で外へ呼ぶ場合も、公開側のピアがトンネルで NAT の内側のピアを呼ぶ場合もある。</li>
+</ul>
+
+<h2 id="settings">7. 設定値</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>キー</th><th>既定</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>trust.seed.acceptUnsigned</code></td><td><code>false</code></td><td>署名の無い（旧実装の）seed を受け入れる</td></tr>
+<tr><td><code>trust.coordinators</code></td><td>空</td><td>信頼するコーディネータの鍵（<code>,</code> 区切り、先頭ほど優先）</td></tr>
+<tr><td><code>trust.bundle.urls</code></td><td>空</td><td>信頼の一覧の束を取りに行く URL</td></tr>
+<tr><td><code>trust.search.acceptUnverified</code></td><td><code>false</code></td><td>開放モード: 信頼集合外・署名なしの文書も「未検証」として検証済みの後ろに出す</td></tr>
+<tr><td><code>trust.policy.excludeTags</code></td><td>空</td><td>このタグを持つ作者の文書を捨てる</td></tr>
+<tr><td><code>trust.selfTags</code></td><td>空</td><td>自分の seed に載せる自己申告のタグ</td></tr>
+<tr><td><code>trust.signedOnly</code></td><td><code>false</code></td><td>コーディネータが無いとき、署名されたピアをすべて信頼する（閉じた網向け）</td></tr>
+<tr><td><code>p2p.sidecar.url</code></td><td>空</td><td>sidecar の制御 API（空なら NAT 越えは無効）</td></tr>
+<tr><td><code>p2p.sidecar.yacyPort</code></td><td><code>8096</code></td><td>sidecar が運んだ要求を受けるループバックの接続口</td></tr>
+<tr><td><code>p2p.mode</code></td><td><code>auto</code></td><td><code>auto</code> / <code>direct</code> / <code>leecher</code></td></tr>
+<tr><td><code>p2p.relay.dhtStorage</code></td><td><code>false</code></td><td>リレー経由でも DHT の保存先になる</td></tr>
+<tr><td><code>remotesearch.maxtime</code></td><td><code>5000</code></td><td>他ピアの応答を待つ時間（ms、最大 10000）。結果は届いた順に表示する</td></tr>
+</tbody></table></div>
+<p>鍵・委任書・一覧・束はコマンドラインの <code>TrustTool</code> で作る。<a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/FORK.md">FORK.md</a> を参照。</p>
+
+<h2 id="limits">8. 既知の制約</h2>
+<ul>
+  <li>日本語・中国語の単語 hash は旧網と異なる（bigram のため）。開放モードでも旧網の CJK の索引とは突き合わない。</li>
+  <li>とても長い文書（約 2700 語超）の Bloom フィルタは偽陽性が増え、単語索引の結果の語の確認が甘くなる。</li>
+  <li>第三者から中継された seed の IP は、自分で hello するまで確かめられていない。</li>
+  <li>応答そのものには署名が無い。信頼ピアになりすませた相手は、署名の対象外の部分（snippet）を差し替えられる。アドレスを含めたチャレンジで防いでいるが、自分の公開アドレスを知らないピアは例外。</li>
+  <li>信頼された作者が虚偽の内容に署名すること、保存ピアが結果を返さないことは防げない。</li>
+</ul>
+</main>
+<footer>YaCy は GPL のフリーソフトウェア。このフォークもそのライセンスを引き継ぐ。YaCy プロジェクトとは関係がない。</footer>
+</body>
+</html>

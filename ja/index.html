@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YaCy improved-search</title>
+<meta name="description" content="YaCy の実験的なフォーク。順位付けの改善、日本語・中国語の検索、ピアと文書の署名、コーディネータの信頼の一覧、libp2p のリレーによる NAT 越えを、docker compose で再現できる閉じた網で測った。">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <a class="brand" href="./">YaCy improved-search</a>
+  <nav>
+    <a href="./" aria-current="page">概要</a>
+    <a href="design.html">信頼と NAT 越えの設計</a>
+    <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">コード</a>
+    <a href="https://github.com/pad01g/yacy-lab">実験</a>
+  </nav>
+  <a class="lang" href="../" hreflang="en" lang="en">English</a>
+</div></div>
+
+<main>
+<header class="hero">
+  <h1>YaCy の実験的なフォーク: 順位付けの改善・署名付きの結果・NAT の内側のピア</h1>
+  <p class="lead"><a href="https://github.com/yacy/yacy_search_server">YaCy</a> のフォーク。公開網で測って見つけた弱点を直し、偽の結果やスパムを除ける信頼の仕組みを足し、NAT の内側のピアもリレー経由で参加できるようにした。このページの主張はすべて、docker compose で誰でも組み直せる閉じた P2P 網で測ったもの。</p>
+  <div class="buttons">
+    <a class="button" href="#try">デモを動かす</a>
+    <a class="button secondary" href="#results">結果を見る</a>
+    <a class="button secondary" href="design.html">設計を読む</a>
+  </div>
+</header>
+
+<div class="note">
+  <p><strong>位置づけ: 実験。</strong>YaCy プロジェクトのリリースではなく、YaCy プロジェクトとは関係がない。公開の YaCy 網との互換性（ピア ID、seed、日本語・中国語の単語 hash）は意図して捨てている。変更の効果をデータ付きで示して議論の材料にし、合うものは小さな単位で本家に提案するために公開している。</p>
+</div>
+
+<h2 id="why">なぜ</h2>
+<p>公開の YaCy 網（freeworld）で 16 クエリを測ったところ、上位 10 件のうちクエリの全語を含む結果は <strong>11%</strong> だった。原因を調べると:</p>
+<ul>
+  <li>2 語以上のクエリを Solr に minimum match 1（OR 検索）で送っていた。自ピアの索引にも、すべての他ピアにも。</li>
+  <li>Solr の点数はピアごとに最高点で割って正規化される。1 語しか一致しない頁しか持たないピアでも、その 1 位が他ピアの完全一致と同じ点になる。</li>
+  <li>日本語・中国語は空白と句読点でしか区切られず、文全体が 1 語になるので、単語索引（RWI）で引けない。</li>
+  <li>新しいピアだけの網では、3 日未満のピアは単語索引の検索先にならない。小さな網の定義では remote Solr 検索の送り先が 0 台になる。</li>
+  <li>結果に出所の証明が無い。ピアはどのクエリにもどんな URL・タイトルでも返せ、seed は第三者に再送・改ざんされうる。</li>
+  <li>NAT の内側のピアは「junior」にしかなれない。外から届かないので、そのピアが索引した頁は他から見えない。</li>
+</ul>
+
+<h2 id="changes">何を変えたか</h2>
+<div class="cards">
+  <div class="card"><h3>順位付け</h3><p>厳しめの minimum match、ピアごとの正規化の後に掛ける語の被覆率の重み、本文の薄い頁の減点、小さな網での全ピアへの問い合わせ。</p></div>
+  <div class="card"><h3>日本語・中国語</h3><p>CJK の文字列を重なりのある 2 文字（bigram）として、Solr でも単語索引でも索引・検索する。</p></div>
+  <div class="card"><h3>信頼</h3><p>Ed25519 のピアの鍵、署名付きの seed、宣言タグ付きでコーディネータが署名する信頼の一覧、全文書への作者の署名。</p></div>
+  <div class="card"><h3>NAT 越え</h3><p>go-libp2p の小さな sidecar が circuit relay に予約を取り、NAT の内側のピアも検索に応答できる。</p></div>
+</div>
+
+<h3>検索品質</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>症状</th><th>原因</th><th>変更</th></tr></thead>
+<tbody>
+<tr><td>1 語だけ一致する頁（キーワードの詰め込み）が上位に来る</td><td>2 語以上のクエリに Solr の <code>mm=1</code></td><td>minimum match <code>2&lt;-1 5&lt;80%</code>: 2 語は両方必須、3〜5 語は 1 語の欠けを許す（<code>search.ranking.solr.mm</code>, <code>.mm.cjk</code>）</td></tr>
+<tr><td>あるピアの部分一致の 1 位が、他ピアの完全一致と同じ順位になる</td><td>ピアごとの点数の正規化</td><td>正規化後の点数に（見つかった語 / クエリの語）² を掛ける（<code>search.ranking.coverage.exponent</code>）</td></tr>
+<tr><td>日本語・中国語が単語索引で引けない</td><td>CJK の分かち書きが無い</td><td>単語索引とクエリで重なりのある bigram に分ける。Solr の schema に <code>CJKWidthFilter</code> + <code>CJKBigramFilter</code></td></tr>
+<tr><td>クエリ全体をタイトルに持つ本文の薄い頁（タグ一覧）が上位に来る</td><td><code>qf</code> が title^15・h1^11 に対して本文 ^1</td><td>本文が 100 語未満の結果に 語数 / 100 の重みを掛ける（<code>search.ranking.thin.words</code>）。CJK の語数の数え方を修正（空白の数を数えていた）</td></tr>
+<tr><td>新しいピアだけの網で、他ピアの単語索引を検索しない</td><td>DHT 検索は 3 日以上のピアだけ</td><td>設定可能に（<code>remotesearch.dht.minage</code>、既定 3）</td></tr>
+<tr><td>小さな網で remote Solr 検索がどこにも飛ばない、DHT 検索先を外す</td><td>送り先数の式が 0 になる。DHT 検索先は Solr の問い合わせ先から外していた</td><td>32 ピア以下の網では、DHT 検索先も含めて接続中の全ピアに問い合わせる</td></tr>
+</tbody></table></div>
+
+<h3>信頼の仕組み</h3>
+<ul>
+  <li><strong>ピアの身元。</strong>各ピアは Ed25519 の鍵を持つ。12 文字のピア hash は公開鍵から導かれ、seed の中核（名前・ポート・鍵・到達方法・宣言タグ）に署名する。署名の無い seed は既定で受け入れない。hello のチャレンジで、その住所に鍵の持ち主が居ることを確かめる。</li>
+  <li><strong>信頼の一覧。</strong>利用者はコーディネータの鍵を設定する。コーディネータはオペレータに委任し、オペレータは信頼するピアの一覧に署名する。一覧の各ピアには優先度と、<code>ads</code>・<code>proxy:&lt;engine&gt;</code> などの宣言タグが付く。一覧は有効期限ではなく版で管理し、ピアからピアへ広がる。</li>
+  <li><strong>作者の署名。</strong>頁を crawl したピアが、その URL・タイトル・単語の Bloom フィルタに署名する。既定では、署名が正しく、作者が信頼集合にいる結果だけを出す。DHT で文書を預かるピアは文書を偽造できず、できるのは返さないことだけ。</li>
+  <li><strong>開放モード。</strong>署名の無い結果や信頼集合外の結果も「未検証」の印付きで出せる。未検証の結果は必ず検証済みより下に並ぶ。署名が偽造された結果は出さない。</li>
+</ul>
+
+<h3>NAT 越え</h3>
+<p>YaCy の横で同じ鍵を使う sidecar（Go、go-libp2p）を動かす。NAT の内側では circuit relay v2 に予約を取り、回線のアドレスを署名付きの seed で知らせる（<code>Reach=relay</code>）。他のピアはそのピアへのローカルのトンネルのポートを開いて普通の HTTP を使うので、YaCy の既存のクライアントはそのまま動く。このピアは既定では検索に応答するだけで、本人が申し出ない限り DHT のデータを預からない。</p>
+<p>詳しくは<a href="design.html">信頼と NAT 越えの設計</a>。</p>
+
+<h2 id="results">結果</h2>
+<p><a href="https://github.com/pad01g/yacy-lab">yacy-lab</a> の 2 つの実験。どちらも docker compose の閉じた網で、コーパスとクエリは決定的に作る。</p>
+
+<h3>検索品質: 本家とフォーク、各 3 ピア</h3>
+<p>各ピアは 1 サイトずつ crawl する。クエリは 1 番ピアに <code>resource=global</code> で投げ、正解の大半は他のピアにある。罠頁は 2 種類ある。クエリの 1 語を詰め込んだ頁と、クエリ全体をタイトルに持つ中身の薄い「タグ一覧」頁。11 クエリ（英語 6・日本語 4・中国語 1）の平均。2 回測り、範囲を示したもの以外は同じ値。</p>
+<div class="tablewrap"><table>
+<thead><tr><th>クラスタ / 経路</th><th class="num">R-precision ↑</th><th class="num">recall@10 ↑</th><th class="num">上位 R 件の罠 ↓</th><th class="num">上位 10 件で全語を含む ↑</th></tr></thead>
+<tbody>
+<tr><td>本家、既定</td><td class="num">0.52</td><td class="num">0.96</td><td class="num">0.48</td><td class="num">0.42</td></tr>
+<tr class="fork"><td>フォーク、既定</td><td class="num">0.84–0.88</td><td class="num">1.00</td><td class="num">0.12–0.16</td><td class="num">0.75</td></tr>
+<tr><td>本家、単語索引のみ</td><td class="num">0.02</td><td class="num">0.02</td><td class="num">0.00</td><td class="num">0.09</td></tr>
+<tr class="fork"><td>フォーク、単語索引のみ</td><td class="num">0.93</td><td class="num">0.95</td><td class="num">0.07</td><td class="num">0.77</td></tr>
+</tbody></table></div>
+<ul>
+  <li>上位 5 件に入った詰め込み頁（11 クエリの合計）: 本家 <span class="bad">14</span>、フォーク <span class="good">0</span>。</li>
+  <li>タグ一覧頁は下がるが上位 5 件には残る。平均順位は既定の検索で 4.5 位、単語索引のみで 5.0 位。Solr のみでは、薄さの重みなしの 2.0 位が重みありで 3.1 位になる。タイトルにクエリ語を持たない正解頁よりはまだ上。重みを強めればもっと下がるが、正当な短い頁まで下げてしまうので、既定は控えめにしている。</li>
+  <li>本家は新しいピアだけの網で他ピアの単語索引を使えず、日本語・中国語の語はそもそも引けない。</li>
+  <li>minimum match の既定値はこのコーパスを見て選んだ。公開網で妥当かは、公開網で測って確かめる必要がある。</li>
+</ul>
+
+<h3>信頼と NAT 越え: フォーク 6 ピア、リレー、NAT</h3>
+<p>信頼集合のピア 3 台、<code>ads</code> を宣言した信頼集合のピア、スパムを crawl して署名を流用した文書を仕込む「署名はあるが信頼集合外」のピア、MASQUERADE するルーターの内側のピア。<strong>26 の検査がすべて通る。</strong>主なもの:</p>
+<ul>
+  <li>ピア ID は鍵から導かれる。信頼集合外のピアのスパムは既定では出ない。信頼ピアがその複製を持っていても出ない。</li>
+  <li>開放モードではスパムが「未検証」の印付きで、すべての検証済みの結果の下に出る。署名を流用した文書は開放モードでも出ない。</li>
+  <li><code>ads</code> のピアの結果にはタグが付き、<code>excludeTags=ads</code> で消える。</li>
+  <li>NAT の内側のピアには直接届かないが、その頁はリレー経由で見つかり、接続も保たれる。</li>
+  <li>一覧の新しい版はピア間の交換だけで広がる。オペレータの委任を失効させると、そのピアたちの結果が消える。</li>
+</ul>
+
+<h2 id="try">動かしてみる</h2>
+<p>デモは 1 台のマシンで両方の網（本家 3 ピアと、フォークの信頼と NAT 越えの構成）を立て、その前に検索画面を置く。Docker とメモリ 7GB ほどが要る。</p>
+<pre><code>git clone https://github.com/pad01g/yacy_search_server.git yacy
+git clone https://github.com/pad01g/yacy-lab.git
+cd yacy
+git checkout baseline        &amp;&amp; docker build -t yacy-lab/upstream:baseline -f docker/Dockerfile .
+git checkout improved-search &amp;&amp; docker build -t yacy-lab/fork:latest -f docker/Dockerfile .
+docker build -t yacy-lab/sidecar:latest sidecar/
+cd ../yacy-lab
+docker compose -f compose.demo.yaml -p yacydemo up -d
+# http://localhost:8800 を開く（準備に 10 分ほどかかり、進み具合も画面に出る）</code></pre>
+<figure>
+  <img src="../assets/demo.png" alt="デモの画面。同じクエリを本家の網（左）とフォーク（右）に投げたところ。本家はスパム頁を先に並べ、フォークは検証済みの正解頁を先に並べ、開放モードではスパムを未検証の印付きでその下に並べる。" loading="lazy">
+  <figcaption>開放モードで「bitcoin lightning channel」。左の本家はスパムを先に出す。右のフォークは検証済みの結果を先に、スパムは未検証の印付きで下に出す。</figcaption>
+</figure>
+<p>実験そのもの: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code>（検索品質）、<code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code>（信頼と NAT 越え）。詳しくは <a href="https://github.com/pad01g/yacy-lab#readme">yacy-lab の README</a>。</p>
+
+<h2 id="limits">限界</h2>
+<ul>
+  <li>既定では公開の YaCy 網と互換性がない（署名の無い seed を拒否し、日本語・中国語の単語 hash も変わる）。開放モードなら旧ピアも検索できるが、結果は未検証の扱いになる。</li>
+  <li>コーディネータを設定しないピアは、自分の文書しか信頼しない。閉じた網なら <code>trust.signedOnly=true</code> が使える。公開の網では誰かがコーディネータを務める必要がある。</li>
+  <li>コーパスは人工的で小さい（160 頁）。公開網で見つけた弱点を再現するが、公開網での改善幅を予測するものではない。</li>
+  <li>NAT の試験は MASQUERADE するルーター 1 台で、実際の家庭用ルーターではない。穴あけ（DCUtR）は有効にしてあるが、成否は測っていない。</li>
+  <li>信頼された作者が虚偽の内容に署名することは防げない（タグと監査で扱う）。預かったピアが結果を返さないことも防げない。</li>
+</ul>
+
+<h2 id="links">リンク</h2>
+<ul>
+  <li>コード: <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">pad01g/yacy_search_server</a> の branch <code>improved-search</code>（変更の一覧は <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/FORK.md">FORK.md</a>）</li>
+  <li>実験とデモ: <a href="https://github.com/pad01g/yacy-lab">pad01g/yacy-lab</a></li>
+  <li>設計書の全文: <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/docs/trust-and-nat.md">docs/trust-and-nat.md</a></li>
+  <li>本家: <a href="https://github.com/yacy/yacy_search_server">yacy/yacy_search_server</a> · <a href="https://community.searchlab.eu/">YaCy フォーラム</a></li>
+</ul>
+</main>
+<footer>YaCy は GPL のフリーソフトウェア。このフォークもそのライセンスを引き継ぐ。YaCy プロジェクトとは関係がない。</footer>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trust and NAT design</title>
+<meta name="description" content="How the YaCy improved-search fork binds peers to Ed25519 keys, signs seeds and documents, distributes coordinator trust lists and reaches peers behind a NAT through a libp2p relay.">
+<link rel="alternate" hreflang="ja" href="ja/design.html">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <a class="brand" href="./">YaCy improved-search</a>
+  <nav>
+    <a href="./">Overview</a>
+    <a href="design.html" aria-current="page">Trust &amp; NAT design</a>
+    <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">Code</a>
+    <a href="https://github.com/pad01g/yacy-lab">Lab</a>
+  </nav>
+  <a class="lang" href="ja/design.html" hreflang="ja" lang="ja">日本語</a>
+</div></div>
+
+<main>
+<header class="hero">
+  <h1>Trust and NAT design</h1>
+  <p class="lead">This page summarizes the design document <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/docs/trust-and-nat.md">docs/trust-and-nat.md</a> (Japanese), which is the reference.</p>
+</header>
+
+<h2 id="threats">1. Goals and threat model</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>Threat</th><th>Before</th><th>With this design</th></tr></thead>
+<tbody>
+<tr><td>Forged results (ads or malware URLs for any query)</td><td>Only format checks; remote results stay even when verification fails</td><td>Every result needs the signature of its <em>author</em> (the peer that crawled it), and by default the author must be on a coordinator's list</td></tr>
+<tr><td>Impersonating peers, altering seeds</td><td>Random peer ids, unsigned seeds</td><td>Peer id = hash of an Ed25519 key. The owner signs the core of its seed, and hello proves key ownership with a challenge</td></tr>
+<tr><td>Mass creation of peers (Sybil)</td><td>After 3 days a new peer is a DHT search target</td><td>Search trust comes from lists (admission). Documents of peers not on a list are not used by default</td></tr>
+<tr><td>Storage peers altering DHT data</td><td>Not detectable</td><td>Storage peers need not be trusted. Author signatures reveal changes, so all they can do is withhold data</td></tr>
+<tr><td>Trusted peers that mix in ads or relay other engines</td><td>—</td><td>Not forbidden, but declared as tags on the list. Users decide by policy</td></tr>
+</tbody></table></div>
+<p><strong>Out of scope:</strong> storage peers withholding results, false content signed by a trusted author (handled by tags and audit), query privacy.</p>
+
+<h2 id="identity">2. Identity</h2>
+<ul>
+  <li>At start a peer reads <code>DATA/SETTINGS/peer.key</code> (Ed25519, PKCS#8 PEM) and creates it if missing.</li>
+  <li>Peer hash (12 characters) = the first 12 characters of the URL-safe base64 of SHA-256(public key). Upstream's choice of ids to fill gaps in the DHT is dropped: the key decides.</li>
+  <li>The same key is the libp2p key of the NAT sidecar. The libp2p peer id (<code>12D3KooW…</code>) is computed from the public key and is not stored in the seed.</li>
+</ul>
+
+<h3>2.1 Signed seeds</h3>
+<p>Receivers rewrite parts of a seed (IP, type, flags, last seen) and relay it. Only the fields that the owner alone decides are signed:</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Signed core</th><th>Not signed (observed or rewritten by receivers)</th></tr></thead>
+<tbody><tr><td><code>Hash</code>, <code>PK</code>, <code>Name</code>, <code>Port</code>, <code>PortSSL</code>, <code>BDate</code>, <code>SigT</code> (signing time), <code>Tags</code> (self-declared), <code>Reach</code>, <code>P2PA</code>, <code>RDS</code></td><td><code>IP</code>, <code>IP6</code>, <code>PeerType</code>, <code>Flags</code>, counters, <code>LastSeen</code>, <code>news</code>, <code>TV</code></td></tr></tbody>
+</table></div>
+<ul>
+  <li><code>Sig</code> = Ed25519 over <code>"yacy-seed-v1\n" + "Hash=&lt;hash&gt;\n"</code> followed by the other core fields that have a value, as <code>k=v\n</code> in key order (<code>BDate, Name, P2PA, PK, Port, PortSSL, RDS, Reach, SigT, Tags</code>).</li>
+  <li>A seed with <code>PK</code> must satisfy <code>Hash == H(PK)</code> and carry a valid <code>Sig</code>, or it is always rejected. Seeds without <code>PK</code> are rejected unless <code>trust.seed.acceptUnsigned=true</code>.</li>
+  <li>A peer signs its seed again when the core changes or the last signature is 7 days old. Seeds whose <code>SigT</code> is older than 30 days, or more than 1 hour in the future, are rejected for peers not yet known. A known signed seed is never replaced by an older or unsigned one.</li>
+</ul>
+
+<h3>2.2 Hello challenge</h3>
+<p>The IP address is not signed, so hello checks that the key owner really answers at that address:</p>
+<ul>
+  <li>The caller sends a random <code>challenge</code>. The responder returns the address it saw the request come from (<code>challengeFor</code>, or <code>p2p</code> through the sidecar) and <code>Sign("yacy-hello-v2|" + challenge + "|" + own hash + "|" + challengeFor)</code>.</li>
+  <li>The caller verifies the signature with the <code>PK</code> of the returned seed and checks that <code>challengeFor</code> is its own address. Binding the address defeats an attacker who forwards the challenge to the real peer and returns its answer: the real peer signs "a request from the attacker".</li>
+  <li>The back-ping (the responder calling the caller back to test reachability) uses the same challenge, so a seed that claims someone else's IP is rejected.</li>
+  <li>Peers that do not know their public address (juniors, peers behind a NAT) skip the address check. The forwarding attack remains possible only for them.</li>
+</ul>
+
+<h2 id="lists">3. Delegation and trust lists</h2>
+<div class="diagram"><pre>coordinator key (configured by the user; several allowed, first has priority)
+  └─ delegation: "this operator key may publish the list for this network"   (versioned; revocation is a newer version)
+       └─ peer list: "trust these peers, with this priority and these tags"  (signed by the operator; versioned)</pre></div>
+<ul>
+  <li>One level of delegation. A coordinator may be its own operator.</li>
+  <li><strong>No expiry, only versions.</strong> If the operators disappear, the last version keeps working.</li>
+  <li>Everything travels in one envelope format. The signature covers the payload bytes, so no JSON canonicalization is needed:</li>
+</ul>
+<pre><code>{"payload": "&lt;base64url(JSON bytes)&gt;", "signer": "&lt;base64url public key&gt;", "sig": "&lt;base64url signature&gt;"}
+
+{"type": "yacy-delegation-v1", "network": "freeworld", "operator": "&lt;pk&gt;", "version": 3, "revoked": false}
+{"type": "yacy-peerlist-v1", "network": "freeworld", "version": 12,
+ "peers": [{"pk": "&lt;pk&gt;", "priority": 100, "tags": ["ads"]}]}</code></pre>
+<ul>
+  <li>Delegations must be signed by a coordinator. The highest version per (coordinator, operator) wins, and <code>revoked:true</code> invalidates that operator's lists. Lists must be signed by an operator with a valid delegation, and the highest version per operator wins. <code>network</code> must equal <code>network.unit.name</code> or be <code>*</code>.</li>
+  <li>The effective trust set layers the lists in coordinator order. A peer keeps the priority and tags of the first list that names it. Matching uses the full public key, not only the 72-bit peer hash.</li>
+  <li><code>priority</code> is 0–100, and result scores are multiplied by <code>0.5 + 0.5 × priority / 100</code>.</li>
+  <li><strong>Without coordinators a peer trusts only its own documents</strong> (fail closed). Closed networks where everybody knows everybody can set <code>trust.signedOnly=true</code> to trust every signed peer. A distribution would ship its coordinator key as the default; this fork ships none.</li>
+</ul>
+
+<h3>3.1 Declared tags</h3>
+<p>A small common vocabulary. Coordinators may add their own tags with an <code>x-&lt;name&gt;:</code> prefix.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Tag</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>ads</code></td><td>mixes advertising into results</td></tr>
+<tr><td><code>proxy:&lt;engine&gt;</code></td><td>relays results of an external search engine</td></tr>
+<tr><td><code>curated</code></td><td>hand-curated index</td></tr>
+<tr><td><code>unfiltered</code></td><td>no curation</td></tr>
+<tr><td><code>adult</code></td><td>contains adult content</td></tr>
+</tbody></table></div>
+<p>Tags on the list are authoritative. Tags in the seed are self-declared and only displayed. <code>trust.policy.excludeTags</code> drops documents of authors with those tags, and results carry their author's tags.</p>
+
+<h2 id="distribution">4. Distributing lists</h2>
+<ul>
+  <li>Each peer verifies the envelopes it receives, stores them in <code>DATA/SETTINGS/trust-bundle.json</code> and serves them at <code>/yacy/trust.json</code>. Anybody may relay them.</li>
+  <li>The seed carries <code>TV</code>: per coordinator, the <em>sum</em> of the versions of all envelopes held (delegations plus lists, revoked operators included). Any new envelope raises the sum, and a revocation never lowers it.</li>
+  <li>On every peer ping, if a connected peer announces a larger <code>TV</code>, the peer fetches that peer's <code>/yacy/trust.json</code> and merges it. <code>TV</code> is unsigned, so peers are asked in random order, and a peer that gave nothing new is not asked again for 10 minutes.</li>
+  <li><code>trust.bundle.urls</code> is also fetched at start, every 10 minutes and whenever the setting changes. Learning about new versions over several paths makes it harder to hold a peer on an old version.</li>
+</ul>
+
+<h2 id="provenance">5. Document provenance (author signatures)</h2>
+<ul>
+  <li>A peer signs each document when it indexes a page it crawled. The value is stored in the Solr field <code>provenance_s</code> and carried in DHT transfers and word index results as property <code>prov</code>: <code>1|&lt;author key&gt;|&lt;signature&gt;|&lt;word Bloom filter&gt;</code>.</li>
+  <li>Signed bytes: <code>"yacy-doc-v1\n" + normalized URL + "\n" + title + "\n" + Bloom</code>. The Bloom filter holds the hashes of the document's words, the same words that go into the word index. Its size is the smallest power of two ≥ 12 bits per word (512–32768 bits), with 4 hash functions.</li>
+</ul>
+<div class="tablewrap"><table>
+<thead><tr><th>Verdict</th><th>Condition</th><th>Default</th></tr></thead>
+<tbody>
+<tr><td><code>SELF</code></td><td>the author is this peer</td><td>used</td></tr>
+<tr><td><code>TRUSTED</code></td><td>valid signature, author in the trust set</td><td>used, with the author's priority and tags</td></tr>
+<tr><td><code>SIGNED</code></td><td>valid signature, author not in the trust set</td><td>dropped (open mode: "unverified")</td></tr>
+<tr><td><code>UNSIGNED</code></td><td>no provenance</td><td>dropped (open mode: "unverified")</td></tr>
+<tr><td><code>INVALID</code></td><td>signature does not match, key does not match the author, or URL or title changed</td><td><strong>always dropped</strong></td></tr>
+</tbody></table></div>
+<ul>
+  <li>Word index results must also have every query word in the Bloom filter, so a storage peer cannot attach a trusted document to unrelated words.</li>
+  <li>Snippets, text, descriptions, headings and image alt texts are not signed. They are kept only when the answering peer is the author or a trusted peer at a proven address. Remote results are stored locally (<code>remotesearch.result.store</code>) only when the answering peer is the trusted author.</li>
+  <li>DHT storage (<code>transferURL</code>) rejects <code>INVALID</code> and accepts <code>UNSIGNED</code> only in open mode. Storage peers do not need to trust the author.</li>
+</ul>
+
+<h2 id="nat">6. NAT traversal</h2>
+<div class="diagram"><pre> behind the NAT                            public side
+┌──────────────────────┐          ┌──────────────────┐          ┌──────────────────────┐
+│ YaCy ── sidecar ─────┼─ outbound ▶ relay (sidecar)  ◀ outbound ┼── sidecar ── YaCy    │
+│  :8090   :8095 /:4001│ reserve  │  :4001           │ circuit  │  :8095     :8090     │
+└──────────────────────┘          └──────────────────┘          └──────────────────────┘
+          ◀────────────── DCUtR hole punching upgrades to a direct connection (if it works) ──────────────▶</pre></div>
+<ul>
+  <li><strong>Sidecar</strong> (<code>sidecar/</code>, Go, go-libp2p): a libp2p host with YaCy's key. If the peer is not publicly reachable it reserves a slot on a configured circuit relay v2 and tries DCUtR.</li>
+  <li><strong>Tunnels.</strong> YaCy asks the control API <code>GET /tunnel/&lt;libp2p peer id&gt;?addrs=…</code> and gets a local port. Plain HTTP to <code>127.0.0.1:port</code> is carried over a libp2p stream (<code>/yacy/http/1.0.0</code>) to the other sidecar. Because it is an ordinary host:port, YaCy's protocol and Solr clients work unchanged.</li>
+  <li>The receiving sidecar forwards only <code>/yacy/*</code> and Solr select to a dedicated YaCy connector (<code>127.0.0.1:8096</code>). It never forwards admin pages, and it strips headers that claim a client address. The connector replaces the client address with an address in <code>2001:db8::/32</code> derived from the libp2p peer id, so tunnelled requests get none of the privileges of loopback clients, and rate limits apply per peer. The connector believes the peer id header only together with the sidecar's token.</li>
+  <li>The control API requires a token that YaCy writes to <code>DATA/SETTINGS/sidecar.token</code>, a loopback Host header and no <code>Origin</code>, against other local processes and DNS rebinding. Limits: 256 tunnels, 15 minutes idle, 8 concurrent requests per peer, 60 s and 32 MiB per request.</li>
+  <li>YaCy switches its seed to <code>Reach=relay</code> with the circuit address in <code>P2PA</code> when AutoNAT says "private", or when there is no verdict and three peers in a row report it as junior. It stays there until AutoNAT says "public". <code>p2p.mode=leecher</code> means <code>Reach=none</code>.</li>
+  <li>Peers behind a relay only answer searches by default. They are not DHT storage or DHT search targets unless they declare <code>p2p.relay.dhtStorage=true</code> (seed field <code>RDS=1</code>).</li>
+  <li>hello through the sidecar must come from the libp2p identity of the seed's key. Both directions are allowed: a NAT peer calling out through the relay, and a public peer calling a NAT peer through its tunnel.</li>
+</ul>
+
+<h2 id="settings">7. Settings</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>Key</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>trust.seed.acceptUnsigned</code></td><td><code>false</code></td><td>accept unsigned (old) seeds</td></tr>
+<tr><td><code>trust.coordinators</code></td><td>empty</td><td>trusted coordinator keys, comma separated, first has priority</td></tr>
+<tr><td><code>trust.bundle.urls</code></td><td>empty</td><td>URLs to fetch trust bundles from</td></tr>
+<tr><td><code>trust.search.acceptUnverified</code></td><td><code>false</code></td><td>open mode: show untrusted and unsigned documents as "unverified", after the verified ones</td></tr>
+<tr><td><code>trust.policy.excludeTags</code></td><td>empty</td><td>drop documents of authors with these tags</td></tr>
+<tr><td><code>trust.selfTags</code></td><td>empty</td><td>tags this peer declares in its own seed</td></tr>
+<tr><td><code>trust.signedOnly</code></td><td><code>false</code></td><td>without coordinators, trust every signed peer (closed networks)</td></tr>
+<tr><td><code>p2p.sidecar.url</code></td><td>empty</td><td>control API of the sidecar (empty: NAT traversal off)</td></tr>
+<tr><td><code>p2p.sidecar.yacyPort</code></td><td><code>8096</code></td><td>loopback connector for requests carried by the sidecar</td></tr>
+<tr><td><code>p2p.mode</code></td><td><code>auto</code></td><td><code>auto</code> / <code>direct</code> / <code>leecher</code></td></tr>
+<tr><td><code>p2p.relay.dhtStorage</code></td><td><code>false</code></td><td>offer DHT storage even behind a relay</td></tr>
+<tr><td><code>remotesearch.maxtime</code></td><td><code>5000</code></td><td>milliseconds to wait for other peers (at most 10000). Results are shown as they arrive</td></tr>
+</tbody></table></div>
+<p>Keys, delegations, lists and bundles are made with the <code>TrustTool</code> command line tool. See <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/FORK.md">FORK.md</a>.</p>
+
+<h2 id="limits">8. Known limits</h2>
+<ul>
+  <li>Japanese and Chinese word hashes differ from the old network (bigrams), even in open mode.</li>
+  <li>Bloom filters of very long documents (above about 2700 words) have more false positives, so the word check on word index results is weaker there.</li>
+  <li>The IP of a seed relayed by a third party is unproven until this peer says hello itself.</li>
+  <li>Responses themselves are not signed. A peer impersonating a trusted peer could replace unsigned parts (snippets). The address-bound challenge prevents that, except for peers that do not know their public address.</li>
+  <li>A trusted author can sign false content, and a storage peer can withhold results.</li>
+</ul>
+</main>
+<footer>YaCy is free software under the GPL. This fork keeps its licenses. Not affiliated with the YaCy project.</footer>
+</body>
+</html>

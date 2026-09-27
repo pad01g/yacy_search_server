@@ -54,6 +54,24 @@ public class QueryGoalCJKTest {
     }
 
     @Test
+    public void testSingleCJKCharacterNextToLatinIsDropped() {
+        // the index keeps no single character words, so "用" would make the RWI join empty
+        final Set<String> words = new QueryGoal("iphone用").getIncludeWordsSet();
+        assertTrue(words.contains("iphone"));
+        assertFalse(words.contains("用"));
+        // a query of one CJK character keeps it
+        assertTrue(new QueryGoal("東").getIncludeWordsSet().contains("東"));
+    }
+
+    @Test
+    public void testCJKExcludeWordsAreNotSplit() {
+        final QueryGoal goal = new QueryGoal("投資 -資産運用");
+        final Set<String> excluded = goal.getExcludeWordsSet();
+        assertTrue(excluded.contains("資産運用"));
+        assertFalse(excluded.contains("資産"));
+    }
+
+    @Test
     public void testMinimumMatch() {
         // without a running Switchboard the defaults apply
         assertEquals("2<-1 5<80%", QueryParams.minimumMatch(new QueryGoal("tokio select cancellation safety")));

@@ -182,6 +182,36 @@ public class TrustStoreTest {
     }
 
     @Test
+    public void testOtherNetworkCannotBlockOrRevoke() throws Exception {
+        add(delegation(this.coordinator, this.operator, 1, false));
+        add(list(this.operator, 1, new Object[][] {{this.peerA, 100}}));
+        // a high version and a revocation for another network
+        final JSONObject p = new JSONObject();
+        p.put("type", TrustEnvelope.TYPE_PEERLIST);
+        p.put("network", "testnet");
+        p.put("version", 40);
+        p.put("peers", new JSONArray());
+        add(TrustEnvelope.sign(p, this.operator));
+        final JSONObject r = new JSONObject();
+        r.put("type", TrustEnvelope.TYPE_DELEGATION);
+        r.put("network", "testnet");
+        r.put("operator", pk(this.operator));
+        r.put("version", 9);
+        r.put("revoked", true);
+        add(TrustEnvelope.sign(r, this.coordinator));
+        assertEquals(1, this.store.effective().size());
+        add(list(this.operator, 2, new Object[][] {{this.peerA, 100}, {this.peerB, 100}}));
+        assertEquals(2, this.store.effective().size());
+    }
+
+    @Test
+    public void testHugeVersionsAreRejected() throws Exception {
+        add(delegation(this.coordinator, this.operator, 1, false));
+        add(list(this.operator, TrustStore.MAX_VERSION + 1, new Object[][] {{this.peerA, 100}}));
+        assertTrue(this.store.effective().isEmpty());
+    }
+
+    @Test
     public void testOtherNetworkIsIgnored() throws Exception {
         final TrustStore other = new TrustStore(null, () -> this.coordinators, () -> "freeworld");
         other.importJSON(list(this.coordinator, 1, new Object[][] {{this.peerA, 100}}).toString(), false);

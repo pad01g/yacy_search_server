@@ -37,6 +37,7 @@ import net.yacy.cora.protocol.RequestHeader;
 import net.yacy.cora.util.ConcurrentLog;
 import net.yacy.peers.Network;
 import net.yacy.peers.Protocol;
+import net.yacy.peers.trust.P2PRoute;
 import net.yacy.peers.trust.PeerIdentity;
 import net.yacy.peers.trust.SeedSignature;
 import net.yacy.search.Switchboard;
@@ -62,6 +63,7 @@ public final class query {
         final serverObjects prop = new serverObjects();
         prop.put("magic", Network.magic);
         prop.put("challengeSig", "");
+        prop.put("challengeFor", "");
 
         if ((post == null) || (ss == null) || !Protocol.authentifyRequest(post, ss)) {
             prop.put("response", "-1"); // request rejected
@@ -113,7 +115,11 @@ public final class query {
             final String challenge = post.get("challenge", "");
             final PeerIdentity identity = PeerIdentity.get();
             if (!challenge.isEmpty() && challenge.length() <= 64 && identity != null) {
-                prop.put("challengeSig", SeedSignature.answerChallenge(identity, challenge));
+                final String client = header.getRemoteAddr();
+                final String sidecarPeer = header.get(P2PRoute.SIDECAR_HEADER);
+                final String observed = sidecarPeer != null && P2PRoute.isSidecarClient(client, sidecarPeer) ? SeedSignature.OBSERVED_SIDECAR : client;
+                prop.put("challengeFor", observed);
+                prop.put("challengeSig", SeedSignature.answerChallenge(identity, challenge, observed));
             }
             return prop;
         }

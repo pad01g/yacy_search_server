@@ -33,6 +33,11 @@ public final class TrustPolicy {
     public static final String SEARCH_ACCEPT_UNVERIFIED = "trust.search.acceptUnverified";
     public static final String POLICY_EXCLUDE_TAGS = "trust.policy.excludeTags";
     public static final String SELF_TAGS = "trust.selfTags";
+    /**
+     * Without coordinators nobody but this peer is trusted (fail closed). trust.signedOnly=true instead trusts every
+     * peer with a valid signature: useful for closed networks where every peer is known, never for open ones.
+     */
+    public static final String SIGNED_ONLY = "trust.signedOnly";
 
     public static final String P2P_SIDECAR_URL = "p2p.sidecar.url";
     public static final String P2P_MODE = "p2p.mode";
@@ -40,6 +45,9 @@ public final class TrustPolicy {
     public static final String P2P_MODE_DIRECT = "direct";
     public static final String P2P_MODE_LEECHER = "leecher";
     public static final String P2P_RELAY_DHT_STORAGE = "p2p.relay.dhtStorage";
+    /** loopback port of the connector the sidecar uses to pass requests of other peers to YaCy */
+    public static final String P2P_SIDECAR_YACY_PORT = "p2p.sidecar.yacyPort";
+    public static final int P2P_SIDECAR_YACY_PORT_DEFAULT = 8096;
 
     /** the remote search waiting time may be configured up to this many milliseconds */
     public static final long REMOTESEARCH_MAXTIME_LIMIT = 10000;
@@ -62,6 +70,26 @@ public final class TrustPolicy {
     public static boolean acceptUnverifiedResults() {
         final Switchboard sb = sb();
         return sb == null || sb.getConfigBool(SEARCH_ACCEPT_UNVERIFIED, false);
+    }
+
+    /** @return true if every peer with a valid signature counts as trusted when no coordinator is configured */
+    public static boolean signedOnly() {
+        final Switchboard sb = sb();
+        return sb != null && sb.getConfigBool(SIGNED_ONLY, false);
+    }
+
+    private static volatile String coordinatorsConfig = null;
+    private static volatile java.util.List<String> coordinatorsParsed = java.util.Collections.emptyList();
+
+    /** @return the configured coordinator keys; the parsed list is cached until the setting changes */
+    public static java.util.List<String> coordinators() {
+        final Switchboard sb = sb();
+        final String config = sb == null ? "" : sb.getConfig(COORDINATORS, "");
+        if (!config.equals(coordinatorsConfig)) {
+            coordinatorsParsed = java.util.Collections.unmodifiableList(TrustStore.parseCoordinators(config));
+            coordinatorsConfig = config;
+        }
+        return coordinatorsParsed;
     }
 
     public static Set<String> excludedTags() {

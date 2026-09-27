@@ -55,7 +55,7 @@ The table explains values that an agent or script must set deliberately. Paramet
 
 | Parameter | Meaning and valid values | Care |
 | --- | --- | --- |
-| `challenge` | With `object=rwicount`: random string (at most 64 characters). The response field `challengeSig` signs it like `/yacy/hello.html` does. | Used by the hello back-ping: an address counts as the peer's only if the owner of the seed key answers there. |
+| `challenge` | With `object=rwicount`: random string (at most 64 characters). The response fields `challengeFor` and `challengeSig` answer it like `/yacy/hello.html` does. | Used by the hello back-ping: an address counts as the peer's only if the owner of the seed key answers there, for a request coming from the caller. |
 
 Example request shape:
 

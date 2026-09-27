@@ -52,6 +52,37 @@ public class PeerActions {
         this.userAgents = null;
     }
 
+    /** signatures may be at most this far in the future */
+    static final long MAX_SIGNATURE_SKEW = 60L * 60L * 1000L;
+
+    /**
+     * A seed signed by its owner must not be replaced by an older signed seed (replay of old ports, reach or tags),
+     * by an unsigned seed (downgrade), and a peer that relays the seed of a signed peer must not move it to another
+     * address. Called with the stored seed of the same hash, if any.
+     * @return null if the seed may replace the stored one, otherwise the reason
+     */
+    static String replayReason(final Seed seed, final Seed stored, final boolean direct) {
+        final long now = System.currentTimeMillis();
+        final long sigT = sigTime(seed);
+        if (sigT > now + MAX_SIGNATURE_SKEW) return "signature time in the future";
+        if (stored == null || !stored.isSigned()) return null;
+        if (!seed.isSigned()) return "unsigned seed for a signed peer";
+        if (sigT < sigTime(stored)) return "older signature than the known one";
+        if (!direct && !seed.getIPs().equals(stored.getIPs())) {
+            // keep the address we know; only the peer itself (direct contact) moves it
+            seed.setIPs(stored.getIPs());
+        }
+        return null;
+    }
+
+    private static long sigTime(final Seed s) {
+        try {
+            return Long.parseLong(s.get(Seed.SIGT, "0"));
+        } catch (final NumberFormatException e) {
+            return 0;
+        }
+    }
+
     public boolean connectPeer(final Seed seed, final boolean direct) {
         // store a remote peer's seed
         // returns true if the peer is new and previously unknown
@@ -68,6 +99,11 @@ public class PeerActions {
         if (signature == SeedSignature.Status.INVALID
                 || (signature == SeedSignature.Status.UNSIGNED && !TrustPolicy.acceptUnsignedSeeds())) {
             Network.log.info("connect: rejecting " + signature + " seed " + seed.getName() + "/" + seed.hash);
+            return false;
+        }
+        final String replay = replayReason(seed, this.seedDB.get(seed.hash), direct);
+        if (replay != null) {
+            Network.log.info("connect: rejecting seed " + seed.getName() + "/" + seed.hash + ": " + replay);
             return false;
         }
         if ((this.seedDB.mySeedIsDefined()) && (seed.hash.equals(this.seedDB.mySeed().hash))) {

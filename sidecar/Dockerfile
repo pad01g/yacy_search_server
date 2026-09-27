@@ -8,7 +8,7 @@ COPY . .
 RUN go mod tidy && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /yacy-sidecar .
 
 FROM alpine:3.22
-RUN adduser -D -H sidecar
+RUN adduser -D -H sidecar && mkdir -p /data && chown sidecar:sidecar /data
 COPY --from=build /yacy-sidecar /usr/local/bin/yacy-sidecar
 USER sidecar
 EXPOSE 4001 8095

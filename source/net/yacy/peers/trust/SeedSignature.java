@@ -90,18 +90,36 @@ public final class SeedSignature {
         return Ed25519.verify(pk, canonical(seed), sig) ? Status.VALID : Status.INVALID;
     }
 
-    private static final String HELLO_DOMAIN = "yacy-hello-v1|";
+    private static final String HELLO_DOMAIN = "yacy-hello-v2|";
+    /** the observed address of requests that the libp2p sidecar carried */
+    public static final String OBSERVED_SIDECAR = "p2p";
 
-    /** @return the answer of this peer to a hello challenge */
-    public static String answerChallenge(final PeerIdentity identity, final String challenge) {
-        return identity.sign(HELLO_DOMAIN + challenge + "|" + identity.peerHash());
+    /**
+     * The answer covers the address this peer saw the request coming from. Without it, a peer E could forward a
+     * challenge it got to the real peer V and present V's answer as its own; with it, the challenger sees that V
+     * answered a request that came from E, not from the challenger.
+     * @param observed the client address of the request, or {@link #OBSERVED_SIDECAR}
+     * @return the answer of this peer to a hello challenge
+     */
+    public static String answerChallenge(final PeerIdentity identity, final String challenge, final String observed) {
+        return identity.sign(HELLO_DOMAIN + challenge + "|" + identity.peerHash() + "|" + observed);
     }
 
-    /** @return true if the answer was made with the key in the seed */
-    public static boolean checkChallenge(final Seed seed, final String challenge, final String answer) {
+    /** @return true if the answer was made with the key in the seed, for a request seen from the given address */
+    public static boolean checkChallenge(final Seed seed, final String challenge, final String observed, final String answer) {
         final String pk = seed.get(Seed.PK, null);
-        if (pk == null || answer == null || challenge == null) return false;
+        if (pk == null || answer == null || challenge == null || observed == null) return false;
         if (!seed.hash.equals(PeerIdentity.peerHashOf(pk))) return false;
-        return Ed25519.verify(Ed25519.decode(pk), (HELLO_DOMAIN + challenge + "|" + seed.hash).getBytes(StandardCharsets.UTF_8), Ed25519.decode(answer));
+        return Ed25519.verify(Ed25519.decode(pk), (HELLO_DOMAIN + challenge + "|" + seed.hash + "|" + observed).getBytes(StandardCharsets.UTF_8), Ed25519.decode(answer));
+    }
+
+    /** multiaddrs and tags travel in seed fields: they must not contain the separators of the seed format */
+    public static boolean isSafeFieldValue(final String v) {
+        if (v == null) return true;
+        for (int i = 0; i < v.length(); i++) {
+            final char c = v.charAt(i);
+            if (c == ',' || c == '=' || c == '\n' || c == '\r' || c == '{' || c == '}') return false;
+        }
+        return true;
     }
 }

@@ -115,6 +115,42 @@ public class ProvenanceTest {
     }
 
     @Test
+    public void testNoCoordinatorMeansOnlyOwnDocuments() {
+        final TrustStore store = TrustStore.init(null, java.util.Collections::emptyList, () -> "lab");
+        try {
+            // without coordinators (and without trust.signedOnly) the trust set is empty: fail closed
+            assertTrue(Provenance.currentTrustSet().isEmpty());
+            final String v = signed();
+            assertEquals(Provenance.Status.SELF, Provenance.verify(v, URL, "Autovacuum tuning", Provenance.currentTrustSet()).status);
+            PeerIdentity.setInstance(PeerIdentity.forKeys(Ed25519.generate()));
+            assertEquals(Provenance.Status.SIGNED, Provenance.verify(v, URL, "Autovacuum tuning", Provenance.currentTrustSet()).status);
+        } finally {
+            TrustStore.setInstance(null);
+        }
+        assertTrue(store != null);
+    }
+
+    @Test
+    public void testTrustedEntryMustHaveTheSameKey() {
+        final String v = signed();
+        PeerIdentity.setInstance(PeerIdentity.forKeys(Ed25519.generate()));
+        final Map<String, TrustStore.Entry> set = new HashMap<>();
+        // an entry with the author's hash but another key (a hash collision) does not make the author trusted
+        set.put(this.author.peerHash(), new TrustStore.Entry(PeerIdentity.forKeys(Ed25519.generate()).publicKeyB64(), this.author.peerHash(), 100,
+                new LinkedHashSet<String>(), 0));
+        assertEquals(Provenance.Status.SIGNED, Provenance.verify(v, URL, "Autovacuum tuning", set).status);
+    }
+
+    @Test
+    public void testSidecarClientAddress() {
+        final String a = P2PRoute.sidecarClientAddress("12D3KooWPeerA").getHostAddress();
+        assertTrue(a, a.startsWith("2001:db8:"));
+        assertTrue(P2PRoute.isSidecarClient(a, "12D3KooWPeerA"));
+        assertFalse(P2PRoute.isSidecarClient(a, "12D3KooWPeerB"));
+        assertFalse(P2PRoute.isSidecarClient("127.0.0.1", "12D3KooWPeerA"));
+    }
+
+    @Test
     public void testSplitHashes() {
         assertEquals(2, Provenance.splitHashes("AAAAAAAAAAAABBBBBBBBBBBB").size());
         assertEquals(0, Provenance.splitHashes(null).size());

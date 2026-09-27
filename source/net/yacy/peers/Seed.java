@@ -714,18 +714,26 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         return this.dna;
     }
 
-    // cache of the last signature check: the signed part and its result
-    private volatile String sigCheckedFor = null;
-    private volatile SeedSignature.Status sigStatus = null;
+    // cache of the last signature check: the signed part and its result, in one object so that they always match
+    private static final class SigCheck {
+        final String key;
+        final SeedSignature.Status status;
+
+        SigCheck(final String key, final SeedSignature.Status status) {
+            this.key = key;
+            this.status = status;
+        }
+    }
+
+    private volatile SigCheck sigCheck = null;
 
     /** @return whether the owner signed this seed; the result is cached until the signed fields change */
     public final SeedSignature.Status signatureStatus() {
         final String key = SeedSignature.cacheKey(this);
-        final SeedSignature.Status cached = this.sigStatus;
-        if (cached != null && key.equals(this.sigCheckedFor)) return cached;
+        final SigCheck cached = this.sigCheck;
+        if (cached != null && key.equals(cached.key)) return cached.status;
         final SeedSignature.Status status = SeedSignature.verify(this);
-        this.sigStatus = status;
-        this.sigCheckedFor = key;
+        this.sigCheck = new SigCheck(key, status);
         return status;
     }
 
@@ -880,8 +888,6 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
      * @return an address string which can be used as host:port part of an url
      */
     public final String getPublicAddress(final InetAddress ip) {
-        final String routed = routedAddress();
-        if (routed != null) return routed;
         // we do not use getPublicAddress(String ip) here to be able to check IPv6 with instanceof Inet6Address which is faster than indexOf(':')
         if (ip == null) throw new RuntimeException("ip == NULL"); // that should not happen
         final String port = this.dna.get(Seed.PORT); // we do not use getPort() here to avoid String->Integer->toString() conversion
@@ -908,8 +914,6 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
      * @ŧhrows RuntimeException when the ip parameter is null
      */
     public final String getPublicAddress(final String ip) {
-        final String routed = routedAddress();
-        if (routed != null) return routed;
         if (ip == null) throw new RuntimeException("ip == NULL"); // that should not happen in Peer-to-Peer mode (but can in Intranet mode)
         final String port = this.dna.get(Seed.PORT); // we do not use getPort() here to avoid String->Integer->toString() conversion
         final StringBuilder sb = new StringBuilder(ip.length() + 8); // / = surplus for port
@@ -930,12 +934,6 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         return sb.toString();
     }
     
-    /** @return host:port of the local sidecar tunnel to this peer, or null if it is reached directly */
-    private String routedAddress() {
-        final String routed = P2PRoute.baseURL(this);
-        return routed == null ? null : routed.substring(routed.indexOf("://") + 3);
-    }
-
     /**
      * Generate a public URL using a given ip. This combines the ip with the http(s) port and encloses the ip
      * with square brackets if the ip is of typeIPv6
@@ -1402,6 +1400,18 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         final String seedStr,
         final boolean ownSeed,
         final String patchIP) throws IOException {
+        return genRemoteSeed(seedStr, ownSeed, patchIP, true);
+    }
+
+    /**
+     * @param ownSeed skip the check of the IP (the own seed file, and callers that patch the IP themselves)
+     * @param verifySignature check the owner's signature; false only for the own seed file
+     */
+    private static Seed genRemoteSeed(
+        final String seedStr,
+        final boolean ownSeed,
+        final String patchIP,
+        final boolean verifySignature) throws IOException {
         // this method is used to convert the external representation of a seed into a seed object
         // yacyCore.log.logFinest("genRemoteSeed: seedStr=" + seedStr + " key=" + key);
 
@@ -1428,8 +1438,8 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         }
         final Seed resultSeed = new Seed(hash, dna);
 
-        // check the owner's signature; our own seed file is trusted as it is
-        if (!ownSeed) {
+        // check the owner's signature; only our own seed file is trusted as it is
+        if (verifySignature) {
             final SeedSignature.Status sig = resultSeed.signatureStatus();
             if (sig == SeedSignature.Status.INVALID) {
                 throw new IOException("seed signature invalid for " + hash);
@@ -1590,7 +1600,7 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         final char[] b = new char[(int) f.length()];
         fr.read(b, 0, b.length);
         fr.close();
-        final Seed mySeed = genRemoteSeed(new String(b), true, null);
+        final Seed mySeed = genRemoteSeed(new String(b), true, null, false);
         assert mySeed != null; // in case of an error, an IOException is thrown
         mySeed.dna.put(Seed.IP, ""); // set own IP as unknown
         return mySeed;

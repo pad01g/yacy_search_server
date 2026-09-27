@@ -281,6 +281,31 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
         return Provenance.verify(this.provenance(), this.url().toNormalform(true), this.dc_title(), Provenance.currentTrustSet());
     }
 
+    /**
+     * Verify a document of the own index. Unsigned documents that did not come from other peers (crawled before
+     * documents were signed, or imported by the administrator) belong to this peer; unsigned documents that other
+     * peers transferred (collection "dht") do not.
+     */
+    public Provenance.Verdict verifyProvenanceLocal() {
+        final Provenance.Verdict v = this.verifyProvenance();
+        if (v.status != Provenance.Status.UNSIGNED) return v;
+        final java.util.Collection<Object> collections = this.getFieldValues(CollectionSchema.collection_sxt.getSolrFieldName());
+        if (collections != null && collections.contains("dht")) return v;
+        return Provenance.localDocument();
+    }
+
+    /** remove the content fields that the author signature does not cover (used for copies of untrusted peers) */
+    public void stripUnsignedContent() {
+        for (final CollectionSchema f : UNSIGNED_CONTENT) this.removeFields(f.getSolrFieldName());
+        this.snippet = null;
+    }
+
+    private static final CollectionSchema[] UNSIGNED_CONTENT = {
+            CollectionSchema.description_txt, CollectionSchema.text_t, CollectionSchema.keywords,
+            CollectionSchema.h1_txt, CollectionSchema.h2_txt, CollectionSchema.h3_txt, CollectionSchema.h4_txt,
+            CollectionSchema.h5_txt, CollectionSchema.h6_txt, CollectionSchema.images_text_t, CollectionSchema.images_alt_sxt,
+            CollectionSchema.synonyms_sxt };
+
     public String dc_title() {
         ArrayList<String> a = getStringList(CollectionSchema.title);
         if (a == null || a.size() == 0) return "";

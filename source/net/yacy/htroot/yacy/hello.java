@@ -45,6 +45,7 @@ import net.yacy.peers.Network;
 import net.yacy.peers.Protocol;
 import net.yacy.peers.Seed;
 import net.yacy.peers.graphics.ProfilingGraph;
+import net.yacy.peers.trust.P2PRoute;
 import net.yacy.peers.trust.PeerIdentity;
 import net.yacy.peers.trust.SeedSignature;
 import net.yacy.search.EventTracker;
@@ -59,8 +60,13 @@ public final class hello {
     // example:
     // http://localhost:8090/yacy/hello.html?count=1&seed=p|{Hash=sCJ6Tq8T0N9x,Port=8090,PeerType=junior}
     // http://localhost:8090/yacy/hello.html?count=10&seed=z|H4sIAAAAAAAAADWQW2vDMAyF_81eJork3GyGX-YxGigly2WFvZTQijbQJsHx1pWx_z7nMj1J4ug7B_2s6-GsP5q3G-G6vBz2e0iz8t6zfuBr7-5PUNanQfulhqyzTkuUCFXvmitrBJtq4ed3tkPTtRpXhIiRDAmq0uhHFIiQMduJ-NXYU9NCbrrP1vnjIdUqgk09uIK51V6rMBRIilAo2NajwzfhGcx8QUKsEIp5iCJo-eaTVUXPfPQ4k5dm4pp8NzaESsLzS-14QVNIMlA-ka2m1JuZJJWIBRwPo0GIIiYp4zCSkC5GQSLiJIah0p6X_rvlS-MTbWdhkCSBIni9jA_rfP3-Ae1Oye9dAQAA
-    /** set by the libp2p sidecar on requests it carries from other peers */
-    public static final String SIDECAR_HEADER = "X-YaCy-Libp2p-Peer";
+    private static long sigTime(final Seed s) {
+        try {
+            return Long.parseLong(s.get(Seed.SIGT, "0"));
+        } catch (final NumberFormatException e) {
+            return 0;
+        }
+    }
 
     public static serverObjects respond(final RequestHeader header, final serverObjects post, final serverSwitch env) {
         final Switchboard sb = (Switchboard) env;
@@ -78,13 +84,15 @@ public final class hello {
             prop.put("message", "cannot resolve your IP from your reported location " + clientip);
             return prop;
         }
-        // requests carried by the libp2p sidecar (NAT traversal) arrive from the loopback address;
-        // that address says nothing about the caller and must not be used as its IP
-        final boolean viaSidecar = header.get(SIDECAR_HEADER) != null && ias.isLoopbackAddress();
+        // requests carried by the libp2p sidecar (NAT traversal) arrive on the sidecar connector with an address that
+        // stands for the remote libp2p peer; it is not an IP of the caller and must not be used as such
+        final String sidecarPeer = header.get(P2PRoute.SIDECAR_HEADER);
+        final boolean viaSidecar = sidecarPeer != null && P2PRoute.isSidecarClient(ias.getHostAddress(), sidecarPeer);
         prop.put("yourip", viaSidecar ? "" : ias.getHostAddress());
         prop.put(Seed.YOURTYPE, Seed.PEERTYPE_VIRGIN); // a default value
         prop.put("seedlist", "");
         prop.put("challengeSig", "");
+        prop.put("challengeFor", "");
         if ((post == null) || (env == null)) {
             prop.put("message", "no post or no enviroment");
             return prop;
@@ -99,11 +107,14 @@ public final class hello {
         final String key      = post.get("key", "");      // transmission key for response
         final String seed     = post.get("seed", "");
         int  count            = post.getInt("count", 0);
-        // prove to the caller that we own the key in our seed (see docs/trust-and-nat.md, hello challenge)
+        // prove to the caller that we own the key in our seed, for a request seen from this address
+        // (see docs/trust-and-nat.md, hello challenge)
         final String challenge = post.get("challenge", "");
         final PeerIdentity identity = PeerIdentity.get();
+        final String observed = viaSidecar ? SeedSignature.OBSERVED_SIDECAR : ias.getHostAddress();
+        prop.put("challengeFor", observed);
         if (!challenge.isEmpty() && challenge.length() <= 64 && identity != null) {
-            prop.put("challengeSig", SeedSignature.answerChallenge(identity, challenge));
+            prop.put("challengeSig", SeedSignature.answerChallenge(identity, challenge, observed));
         }
         // final long  magic     = post.getLong("magic", 0);
         // final Date remoteTime = yacyCore.parseUniversalDate(post.get(MYTIME)); // read remote time
@@ -124,6 +135,13 @@ public final class hello {
         if (remoteSeed == null || remoteSeed.hash == null) {
             Network.log.info("hello/server: bad seed: null, time_dnsResolve=" + time_dnsResolve);
             prop.put("message", "cannot parse your seed");
+            return prop;
+        }
+        // a request carried by the sidecar comes from the libp2p peer the sidecar authenticated: it must be the
+        // owner of this seed, and only relayed peers need that path
+        if (viaSidecar && (!sidecarPeer.equals(remoteSeed.libp2pPeerId()) || !remoteSeed.isRelayed())) {
+            Network.log.info("hello/server: rejected seed " + remoteSeed.hash + " sent through the sidecar by libp2p peer " + sidecarPeer);
+            prop.put("message", "your seed does not belong to your libp2p identity");
             return prop;
         }
 
@@ -247,8 +265,14 @@ public final class hello {
             prop.put(Seed.YOURTYPE, Seed.PEERTYPE_JUNIOR);
             remoteSeed.put(Seed.PEERTYPE, Seed.PEERTYPE_JUNIOR);
             Network.log.fine("hello/server: responded remote " + reportedPeerType + " peer '" + remoteSeed.getName() + "' from " + reportedips + ", time_dnsResolve=" + time_dnsResolve + ", time_backping=" + time_backping + ", method=" + backping_method + ", urls=" + callback[0]);
-            // no connection here, instead store junior in connection cache
-            if ((remoteSeed.hash != null) && (remoteSeed.isProper(false) == null)) {
+            // no connection here, instead store junior in connection cache.
+            // A failed back-ping of an unauthenticated caller must not demote a peer we already know with a valid
+            // signature: anybody can resend a signed seed of another peer. Only a newer signature, which only the
+            // owner can make (e.g. after it switched to leecher), may replace it (see docs/trust-and-nat.md)
+            final Seed known = sb.peers.getConnected(remoteSeed.hash);
+            final boolean demotesKnownPeer = known != null && known.isSigned()
+                    && !(remoteSeed.isSigned() && sigTime(remoteSeed) > sigTime(known));
+            if ((remoteSeed.hash != null) && (remoteSeed.isProper(false) == null) && !demotesKnownPeer && !viaSidecar) {
                 sb.peers.peerActions.peerPing(remoteSeed);
             }
         }

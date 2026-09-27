@@ -693,12 +693,11 @@ public final class QueryParams {
      */
     static String minimumMatch(final QueryGoal goal) {
         final Switchboard sb = Switchboard.getSwitchboard();
-        if (goal.containsCJK()) {
-            return sb == null ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK_DEFAULT
-                    : sb.getConfig(SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK, SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK_DEFAULT);
-        }
-        return sb == null ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_DEFAULT
-                : sb.getConfig(SwitchboardConstants.SEARCH_RANKING_SOLR_MM, SwitchboardConstants.SEARCH_RANKING_SOLR_MM_DEFAULT);
+        final boolean cjk = goal.containsCJK();
+        final String key = cjk ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK : SwitchboardConstants.SEARCH_RANKING_SOLR_MM;
+        final String dflt = cjk ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK_DEFAULT : SwitchboardConstants.SEARCH_RANKING_SOLR_MM_DEFAULT;
+        final String value = sb == null ? dflt : sb.getConfig(key, dflt).trim();
+        return value.isEmpty() ? dflt : value; // an empty mm makes Solr reject the query
     }
 
     private SolrQuery solrImageQuery(final boolean getFacets, final boolean strictContentDom) {

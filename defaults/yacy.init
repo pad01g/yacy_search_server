@@ -1043,8 +1043,10 @@ remotesearch.dht.minage = 3
 # accept seeds of peers without owner signature (unmodified YaCy peers); needed to use the index of the old network
 trust.seed.acceptUnsigned = false
 # Ed25519 public keys (base64url) of the trust coordinators, separated by ',', first = highest priority.
-# Empty: every peer with a valid signature counts as trusted.
+# Empty: only this peer's own documents count as trusted (see trust.signedOnly).
 trust.coordinators =
+# without coordinators, trust every peer with a valid signature. Only for closed networks where all peers are known.
+trust.signedOnly = false
 # URLs to fetch signed trust bundles from (in addition to the exchange between peers), separated by ','
 trust.bundle.urls =
 # also show results whose author is not trusted or not signed, marked as unverified and below all verified results
@@ -1055,6 +1057,8 @@ trust.policy.excludeTags =
 trust.selfTags =
 # local HTTP address of the libp2p sidecar (empty: no NAT traversal), e.g. http://127.0.0.1:8095
 p2p.sidecar.url =
+# loopback port on which the sidecar passes requests of other peers to YaCy; they are treated as remote requests
+p2p.sidecar.yacyPort = 8096
 # auto: use a relay when the sidecar reports that the peer is not reachable; direct: never; leecher: do not accept connections
 p2p.mode = auto
 # a peer behind a relay also stores DHT index for others

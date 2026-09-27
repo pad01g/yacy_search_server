@@ -101,6 +101,8 @@ public class DHTSelection {
                 if (!seed.getFlagSolrAvailable()) continue; // extra peers always use solr direct, skip if solr interface is not available
                 // extra peers answer with their own index: ask trusted peers only, unless unverified results are wanted
                 if (!Provenance.isTrustedPeer(seed) && !TrustPolicy.acceptUnverifiedResults()) continue;
+                // every remaining peer is a candidate; the rules below only make some of them more likely
+                seedSelection.dec(seed, 1);
                 if (!seed.getFlagAcceptRemoteIndex() && seed.matchPeerTags(wordhashes)) seedSelection.dec(seed, r.nextInt(10) + 2); // robinson peers with matching peer tags
                 if (seed.getFlagRootNode()) seedSelection.dec(seed, r.nextInt(30) + 6); // root nodes (fast peers)
                 if (seed.getAge() < minage) seedSelection.dec(seed, r.nextInt(15) + 3); // young peers (with fresh info)

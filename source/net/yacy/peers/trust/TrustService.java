@@ -52,6 +52,12 @@ public final class TrustService {
     private static volatile SidecarStatus sidecar = null;
     /** set once the peer switched to the relay because others could not reach it; kept until it is public */
     private static volatile boolean relayChosen = false;
+    /** consecutive pings at which this peer was junior; the relay is chosen after JUNIOR_PINGS_FOR_RELAY */
+    private static volatile int juniorPings = 0;
+    static final int JUNIOR_PINGS_FOR_RELAY = 3;
+    /** peers whose bundle brought nothing new are not asked again for this long */
+    static final long GOSSIP_BACKOFF = 10 * 60 * 1000;
+    private static final java.util.Map<String, Long> gossipBackoff = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** what the sidecar reports on GET /status */
     public static final class SidecarStatus {
@@ -125,9 +131,12 @@ public final class TrustService {
     static boolean useRelay(final SidecarStatus s, final Seed my) {
         if (s == null || s.relayAddrs.isEmpty() || "public".equals(s.reachability)) {
             relayChosen = false;
+            juniorPings = 0;
             return false;
         }
-        if ("private".equals(s.reachability) || my.isJunior()) relayChosen = true;
+        // a single junior report (e.g. at startup, or one failed back-ping) is not enough
+        juniorPings = my.isJunior() ? juniorPings + 1 : 0;
+        if ("private".equals(s.reachability) || juniorPings >= JUNIOR_PINGS_FOR_RELAY) relayChosen = true;
         return relayChosen;
     }
 
@@ -153,32 +162,46 @@ public final class TrustService {
                 importFrom(store, url, "bundle url");
             }
         }
-        // peers that announce newer trust lists than ours
-        int fetched = 0;
+        // peers that announce newer trust lists than ours. TV is not signed: ask in random order, and do not ask a
+        // peer again soon if its bundle brought nothing, so that peers announcing fake versions cannot starve us
+        final List<Seed> candidates = new ArrayList<>();
         final Iterator<Seed> i = sb.peers.seedsConnected(true, false, null, 0.0f);
         int seen = 0;
-        while (i.hasNext() && fetched < MAX_GOSSIP_FETCHES && seen++ < 200) {
+        while (i.hasNext() && seen++ < 500) {
             final Seed s = i.next();
             if (s == null || !s.isSigned() || !store.isNewer(s.get(Seed.TV, null))) continue;
+            final Long until = gossipBackoff.get(s.hash);
+            if (until != null && until > now) continue;
+            candidates.add(s);
+        }
+        java.util.Collections.shuffle(candidates);
+        int fetched = 0;
+        for (final Seed s : candidates) {
+            if (fetched >= MAX_GOSSIP_FETCHES) break;
             final String ip = s.getIP();
             if (ip == null && !s.isRelayed()) continue;
             try {
-                importFrom(store, s.getPublicURL(ip, false) + "/yacy/trust.json", "peer " + s.getName());
+                final int n = importFrom(store, s.getPublicURL(ip, false) + "/yacy/trust.json", "peer " + s.getName());
+                if (n <= 0) gossipBackoff.put(s.hash, now + GOSSIP_BACKOFF);
                 fetched++;
             } catch (final RuntimeException e) {
-                // bad address
+                gossipBackoff.put(s.hash, now + GOSSIP_BACKOFF);
             }
         }
+        if (gossipBackoff.size() > 10000) gossipBackoff.clear();
     }
 
-    private static void importFrom(final TrustStore store, final String url, final String source) {
+    /** @return the number of statements that changed the store, -1 on failure */
+    private static int importFrom(final TrustStore store, final String url, final String source) {
         try {
-            final byte[] body = fetch(url, MAX_BUNDLE_BYTES, Duration.ofSeconds(10));
-            if (body == null) return;
+            final byte[] body = fetch(url, MAX_BUNDLE_BYTES, Duration.ofSeconds(10), null);
+            if (body == null) return -1;
             final int n = store.importJSON(new String(body, StandardCharsets.UTF_8), true);
             if (n > 0) ConcurrentLog.info("TrustService", "imported " + n + " trust statements from " + source + " (" + url + ")");
+            return n;
         } catch (final Exception e) {
             ConcurrentLog.info("TrustService", "cannot load trust bundle from " + source + " (" + url + "): " + e.getMessage());
+            return -1;
         }
     }
 
@@ -189,18 +212,23 @@ public final class TrustService {
             return;
         }
         try {
-            final byte[] body = fetch(base + "/status", 64 * 1024, Duration.ofSeconds(3));
+            final byte[] body = fetch(base + "/status", 64 * 1024, Duration.ofSeconds(3), P2PRoute.token());
             if (body == null) throw new IOException("no answer");
             final JSONObject o = new JSONObject(new String(body, StandardCharsets.UTF_8));
+            // the sidecar must run with our key; another process listening on that port must not be used
+            final PeerIdentity me = PeerIdentity.get();
+            if (me != null && !me.libp2pPeerId().equals(o.optString("peerId", ""))) {
+                throw new IOException("the sidecar reports peer id " + o.optString("peerId", "") + ", expected " + me.libp2pPeerId());
+            }
             final List<String> relay = new ArrayList<>();
             final JSONArray a = o.optJSONArray("relayAddrs");
             if (a != null) for (int k = 0; k < a.length() && k < 8; k++) {
                 final String addr = a.optString(k, "");
                 // multiaddrs must not break the seed format (fields separated by ',' and '|')
-                if (!addr.isEmpty() && addr.length() < 300 && addr.indexOf(',') < 0 && addr.indexOf('|') < 0 && addr.indexOf('=') < 0) relay.add(addr);
+                if (!addr.isEmpty() && addr.length() < 300 && addr.indexOf('|') < 0 && SeedSignature.isSafeFieldValue(addr) && addr.contains("/p2p-circuit/p2p/")) relay.add(addr);
             }
             // a restarted sidecar has new tunnel ports: forget the remembered ones
-            if (P2PRoute.size() > o.optInt("tunnels", 0)) P2PRoute.reset();
+            P2PRoute.sidecarBooted(o.optString("boot", null));
             final SidecarStatus previous = sidecar;
             sidecar = new SidecarStatus(o.optString("peerId", ""), o.optString("reachability", "unknown"), relay);
             if (previous == null || !previous.reachability.equals(sidecar.reachability)) {
@@ -214,9 +242,10 @@ public final class TrustService {
     }
 
     /** GET with a size limit; null for a non-200 answer */
-    static byte[] fetch(final String url, final int maxBytes, final Duration timeout) throws IOException, InterruptedException {
-        final HttpResponse<InputStream> res = P2PRoute.http().send(
-                HttpRequest.newBuilder(URI.create(url)).timeout(timeout).GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+    static byte[] fetch(final String url, final int maxBytes, final Duration timeout, final String sidecarToken) throws IOException, InterruptedException {
+        final HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(url)).timeout(timeout).GET();
+        if (sidecarToken != null) req.header(P2PRoute.TOKEN_HEADER, sidecarToken);
+        final HttpResponse<InputStream> res = P2PRoute.http().send(req.build(), HttpResponse.BodyHandlers.ofInputStream());
         try (InputStream in = res.body()) {
             if (res.statusCode() != 200) return null;
             final ByteArrayOutputStream out = new ByteArrayOutputStream();

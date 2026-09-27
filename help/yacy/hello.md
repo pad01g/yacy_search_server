@@ -56,9 +56,9 @@ The table explains values that an agent or script must set deliberately. Paramet
 | Parameter | Meaning and valid values | Care |
 | --- | --- | --- |
 | `count` | SRU-style result count. It is an alternative to `maximumRecords` on search endpoints. | Controls the scope or format of the result. Prefer the narrowest value that answers the request. |
-| `challenge` | Random string (at most 64 characters) chosen by the caller. The response field `challengeSig` is this peer's Ed25519 signature of `yacy-hello-v1|<challenge>|<peer hash>`, verifiable with the `PK` of its seed. | Callers must reject the peer if the signature does not verify: somebody else answers at that address (see `docs/trust-and-nat.md`). |
+| `challenge` | Random string (at most 64 characters) chosen by the caller. The response field `challengeFor` is the address this peer saw the request coming from (`p2p` for requests carried by the libp2p sidecar), and `challengeSig` is this peer's Ed25519 signature of `yacy-hello-v2|<challenge>|<peer hash>|<challengeFor>`, verifiable with the `PK` of its seed. | Callers must reject the peer if the signature does not verify, and if `challengeFor` is not their own address: then another peer forwarded the challenge (see `docs/trust-and-nat.md`). |
 
-Seeds carry the owner's public key `PK` and signature `Sig` over the fields only the owner decides; the peer hash is derived from `PK`. With `trust.seed.acceptUnsigned=false` (default) seeds without signature are rejected. Requests that the libp2p sidecar carries from peers behind a NAT arrive from the loopback address with the header `X-YaCy-Libp2p-Peer`; for them the loopback address is never used as the caller's IP.
+Seeds carry the owner's public key `PK` and signature `Sig` over the fields only the owner decides; the peer hash is derived from `PK`. With `trust.seed.acceptUnsigned=false` (default) seeds without signature are rejected. Requests that the libp2p sidecar carries from peers behind a NAT arrive on the sidecar connector (`p2p.sidecar.yacyPort`, loopback only) with the header `X-YaCy-Libp2p-Peer`. Their client address is an address in 2001:db8::/32 derived from the libp2p peer id, so they get no localhost privileges and rate limits apply per peer; the seed must belong to that libp2p peer and have `Reach=relay`.
 
 Example request shape:
 

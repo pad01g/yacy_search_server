@@ -83,7 +83,7 @@ public final class Provenance {
         }
 
         /** @return true if every word hash is (probably) in the document; always true for documents without a filter */
-        public boolean containsAll(final Collection<byte[]> wordHashes) {
+        public boolean containsAll(final Iterable<byte[]> wordHashes) {
             if (this.bloom == null) return true;
             for (final byte[] h : wordHashes) if (!bloomContains(this.bloom, h)) return false;
             return true;
@@ -120,10 +120,16 @@ public final class Provenance {
         return VERSION + "|" + identity.publicKeyB64() + "|" + sig + "|" + bloomB64;
     }
 
-    /** @return the effective trust set of this peer, or null if every validly signed author counts as trusted */
+    /**
+     * @return the effective trust set of this peer, or null if every validly signed author counts as trusted: only
+     *         with trust.signedOnly=true and no coordinator, or without a store (tools, unit tests). Without
+     *         coordinators the set is empty, so that only this peer's own documents are trusted (fail closed).
+     */
     public static Map<String, TrustStore.Entry> currentTrustSet() {
         final TrustStore store = TrustStore.get();
-        return store == null ? null : store.effective();
+        if (store == null) return null;
+        if (TrustPolicy.coordinators().isEmpty()) return TrustPolicy.signedOnly() ? null : Collections.<String, TrustStore.Entry>emptyMap();
+        return store.effective();
     }
 
     /**
@@ -143,8 +149,10 @@ public final class Provenance {
         if (!Ed25519.verify(parts[1], payload(url, title, parts[3]), parts[2])) return new Verdict(Status.INVALID, author, null, null);
         if (PeerIdentity.isMine(author)) return new Verdict(Status.SELF, author, null, bloom);
         if (trusted == null) return new Verdict(Status.TRUSTED, author, null, bloom);
+        // compare the full key, not only the 72 bit peer hash
         final TrustStore.Entry entry = trusted.get(author);
-        return entry == null ? new Verdict(Status.SIGNED, author, null, bloom) : new Verdict(Status.TRUSTED, author, entry, bloom);
+        return entry == null || !entry.publicKey.equals(TrustStore.canonicalKey(parts[1]))
+                ? new Verdict(Status.SIGNED, author, null, bloom) : new Verdict(Status.TRUSTED, author, entry, bloom);
     }
 
     // ---- decisions of the search (see docs/trust-and-nat.md, sections 5 and 8)
@@ -161,13 +169,25 @@ public final class Provenance {
         return v.isTrusted() || TrustPolicy.acceptUnverifiedResults();
     }
 
+    /** @return the verdict for an unsigned document of the own index that did not come from other peers */
+    public static Verdict localDocument() {
+        return new Verdict(Status.SELF, null, null, null);
+    }
+
+    /** @return true if the peer that sent the result wrote the document and is trusted */
+    public static boolean isFromAuthor(final Verdict v, final net.yacy.peers.Seed answering) {
+        return v != null && answering != null && v.authorHash != null && v.authorHash.equals(answering.hash)
+                && v.isTrusted() && isTrustedPeer(answering);
+    }
+
     /** @return true if the peer is in the trust set, or signed when no coordinator is configured */
     public static boolean isTrustedPeer(final net.yacy.peers.Seed seed) {
         if (seed == null) return false;
         if (PeerIdentity.isMine(seed.hash)) return true;
         final Map<String, TrustStore.Entry> set = currentTrustSet();
         if (set == null) return seed.isSigned();
-        return seed.isSigned() && set.containsKey(seed.hash);
+        final TrustStore.Entry e = set.get(seed.hash);
+        return e != null && seed.isSigned() && e.publicKey.equals(TrustStore.canonicalKey(seed.get(net.yacy.peers.Seed.PK, null)));
     }
 
     /**

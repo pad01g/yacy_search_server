@@ -253,7 +253,7 @@ public final class Protocol {
                         Network.log.info("yacyClient.hello: consistency error: otherPeer.hash = " + otherPeer.hash + ", otherHash = " + targetHash);
                         return null; // no success
                     }
-                    if (!answeredChallenge(otherPeer, challenge, result)) return null;
+                    if (!answeredChallenge(otherPeer, challenge, result, targetBaseURL)) return null;
                 } catch (final IOException e ) {
                     Network.log.info("yacyClient.hello: consistency error: other seed bad:" + e.getMessage() + ", seed=" + seed);
                     return null; // no success
@@ -363,7 +363,7 @@ public final class Protocol {
                         final String host = routed ? null : resolvedHost(targetBaseURL);
                         if (host == null && !routed) continue;
                         s = Seed.genRemoteSeed(seedStr, false, host);
-                        if (!answeredChallenge(s, challenge, result)) return null;
+                        if (!answeredChallenge(s, challenge, result, targetBaseURL)) return null;
                     } else {
                         s = Seed.genRemoteSeed(seedStr, false, null);
                     }
@@ -395,15 +395,50 @@ public final class Protocol {
     }
 
     /**
-     * A signed seed must prove, with the answer to our challenge, that the peer we reached owns its key.
+     * A signed seed must prove, with the answer to our challenge, that the peer we reached owns its key, and that it
+     * answered a request that came from us (not one that another peer forwarded to it).
      * Unsigned seeds (only accepted with trust.seed.acceptUnsigned=true) cannot prove anything and pass.
      */
-    private static boolean answeredChallenge(final Seed peer, final String challenge, final Map<String, String> result) {
+    private static boolean answeredChallenge(final Seed peer, final String challenge, final Map<String, String> result, final MultiProtocolURL target) {
         if (peer == null) return false;
         if (peer.signatureStatus() == SeedSignature.Status.UNSIGNED) return TrustPolicy.acceptUnsignedSeeds();
-        if (SeedSignature.checkChallenge(peer, challenge, result.get("challengeSig"))) return true;
-        Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " did not prove the ownership of its key");
-        return false;
+        final String observed = result.get("challengeFor");
+        if (!SeedSignature.checkChallenge(peer, challenge, observed, result.get("challengeSig"))) {
+            Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " did not prove the ownership of its key");
+            return false;
+        }
+        if (!observedIsMine(observed, target)) {
+            Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " answered a request from " + observed + ", not from this peer");
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @return true if the address the other peer saw the request coming from is ours. Through a sidecar tunnel it must
+     *         be the sidecar marker. A peer that others cannot reach directly (junior, relayed, leecher) may not
+     *         know its public address behind the NAT and accepts any address.
+     */
+    static boolean observedIsMine(final String observed, final MultiProtocolURL target) {
+        if (P2PRoute.isRouted(target)) return SeedSignature.OBSERVED_SIDECAR.equals(observed);
+        if (SeedSignature.OBSERVED_SIDECAR.equals(observed)) return false;
+        final Switchboard sb = Switchboard.getSwitchboard();
+        if (sb == null || sb.peers == null || !sb.peers.mySeedIsDefined()) return true;
+        final Seed my = sb.peers.mySeed();
+        final Set<String> mine = new HashSet<>(my.getIPs());
+        mine.addAll(sb.myPublicIPs());
+        for (final String ip : mine) if (sameAddress(ip, observed)) return true;
+        if (Domains.isLocalhost(observed)) return Domains.isLocalhost(target.getHost());
+        return !(my.isSenior() || my.isPrincipal()) || !Seed.REACH_DIRECT.equals(my.getReach());
+    }
+
+    private static boolean sameAddress(final String a, final String b) {
+        if (a == null || b == null) return false;
+        if (a.equals(b)) return true;
+        final String x = a.replace("[", "").replace("]", "");
+        final String y = b.replace("[", "").replace("]", "");
+        if (!com.google.common.net.InetAddresses.isInetAddress(x) || !com.google.common.net.InetAddresses.isInetAddress(y)) return false;
+        return com.google.common.net.InetAddresses.forString(x).equals(com.google.common.net.InetAddresses.forString(y));
     }
 
     public static long[] queryRWICount(final MultiProtocolURL targetBaseURL, final Seed target, int timeout) {
@@ -428,7 +463,7 @@ public final class Protocol {
             //ConcurrentLog.info("**hello-DEBUG**queryRWICount**", "received RESPONSE from requesting " + targetBaseURL + " : response = " + resp);
             if (resp == null) return new long[] {-1, -1};
             // the back-ping of hello: only an address where the owner of the seed's key answers counts
-            if (!answeredChallenge(target, challenge, result)) return new long[] {-1, -1};
+            if (!answeredChallenge(target, challenge, result, targetBaseURL)) return new long[] {-1, -1};
             String magic = result.get("magic");
             if (magic == null) magic = "0";
             try {
@@ -745,6 +780,9 @@ public final class Protocol {
             snip = new HashMap<String, LinkedHashSet<String>>(); // needed to display nodestack results
         }
         List<URIMetadataNode> storeDocs = new ArrayList<URIMetadataNode>(result.links.size());
+        // only documents that the answering peer wrote itself go into the local index: other peers' copies may carry
+        // altered unsigned content (see docs/trust-and-nat.md)
+        final List<URIMetadataNode> storable = new ArrayList<URIMetadataNode>(result.links.size());
         for ( final URIMetadataNode urlEntry : result.links ) {
             if ( term-- <= 0 ) {
                 break; // do not process more that requested (in case that evil peers fill us up with rubbish)
@@ -800,7 +838,11 @@ public final class Protocol {
                 continue;
             }
             urlEntry.setTrustVerdict(verdict);
-            if (!Provenance.keepSnippet(verdict, target)) urlEntry.setSnippet(null);
+            if (!Provenance.keepSnippet(verdict, target)) {
+                urlEntry.setSnippet(null);
+                urlEntry.stripUnsignedContent();
+            }
+            if (Provenance.isFromAuthor(verdict, target)) storable.add(urlEntry);
 
             // passed all checks, store url
             storeDocs.add(urlEntry);
@@ -849,7 +891,7 @@ public final class Protocol {
             if (Thread.interrupted()) {
                 throw new InterruptedException("solrQuery interrupted");
             }
-            WriteMetadataNodeToLocalIndexThread writerToLocalIndex = new WriteMetadataNodeToLocalIndexThread(event.query.getSegment(), storeDocs);
+            WriteMetadataNodeToLocalIndexThread writerToLocalIndex = new WriteMetadataNodeToLocalIndexThread(event.query.getSegment(), storable);
             writerToLocalIndex.start();
             try {
                 writerToLocalIndex.join();
@@ -1423,6 +1465,8 @@ public final class Protocol {
         }
 
         List<URIMetadataNode> resultContainer = new ArrayList<URIMetadataNode>();
+        // highlighting may only be used for accepted documents whose snippet this peer may deliver
+        final Set<String> keepSnippets = new HashSet<String>();
         Network.log.info("SEARCH (solr), returned " + docList[0].size() + " out of " + docList[0].getNumFound() + " documents and " + facets.size() + " facets " + facets.keySet().toString() + " from " + (target == null ? "shard" : ("peer " + target.hash + ":" + target.getName())));
         int term = count;
         Collection<SolrInputDocument> docs;
@@ -1469,20 +1513,26 @@ public final class Protocol {
             }
 
             // the author signature decides whether the result is used (see docs/trust-and-nat.md)
-            final Provenance.Verdict verdict = urlEntry.verifyProvenance();
+            final Provenance.Verdict verdict = localsearch ? urlEntry.verifyProvenanceLocal() : urlEntry.verifyProvenance();
             if (!Provenance.accept(verdict)) {
                 if (Network.log.isInfo()) Network.log.info((localsearch ? "local" : "remote") + " search (solr): rejected " + verdict.status + " url " + urlEntry.url().toNormalform(true)
                         + (target == null ? "" : " from peer " + target.getName()));
                 continue;
             }
             urlEntry.setTrustVerdict(verdict);
-            if (!localsearch && snippets != null && !Provenance.keepSnippet(verdict, target)) snippets.remove(ASCII.String(urlEntry.hash()));
+            if (localsearch || Provenance.keepSnippet(verdict, target)) {
+                keepSnippets.add(ASCII.String(urlEntry.hash()));
+            } else {
+                // text, description and highlighting of a copy held by an untrusted peer are not signed
+                urlEntry.stripUnsignedContent();
+            }
 
             // passed all checks, store url
             if (!localsearch) {
 
                 // put the remote documents to the local index. We must convert the solr document to a solr input document:
-                if (event.addResultsToLocalIndex) {
+                // only documents of the answering peer itself, other copies may carry altered unsigned fields
+                if (event.addResultsToLocalIndex && Provenance.isFromAuthor(verdict, target)) {
                     /* Check document size, only if a limit is set on remote documents size allowed to be stored to local index */
                     if (checkDocumentSize(tmpdoc, event.getRemoteDocStoredMaxSize() * 1024)) {
                         final SolrInputDocument sid = event.query.getSegment().fulltext().getDefaultConfiguration().toSolrInputDocument(tmpdoc);
@@ -1514,6 +1564,7 @@ public final class Protocol {
         }
         docList[0].clear();
         docList[0] = null;
+        if (snippets != null) snippets.keySet().retainAll(keepSnippets);
         if (localsearch) {
             event.addNodes(resultContainer, facets, snippets, true, "localpeer", numFound, incrementNavigators);
             event.addFinalize();

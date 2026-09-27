@@ -206,6 +206,7 @@ import net.yacy.peers.NewsPool;
 import net.yacy.peers.Protocol;
 import net.yacy.peers.Seed;
 import net.yacy.peers.SeedDB;
+import net.yacy.peers.trust.P2PRoute;
 import net.yacy.peers.trust.PeerIdentity;
 import net.yacy.peers.trust.TrustPolicy;
 import net.yacy.peers.trust.TrustStore;
@@ -638,11 +639,18 @@ public final class Switchboard extends serverSwitch {
             this.log.severe("cannot load or create the peer key: " + e.getMessage(), e);
             throw new RuntimeException(e);
         }
+        try {
+            P2PRoute.initToken(new File(this.dataPath, P2PRoute.TOKEN_FILE));
+        } catch (final IOException e) {
+            this.log.warn("cannot write the sidecar token: " + e.getMessage());
+        }
         TrustStore.init(new File(this.dataPath, TrustStore.BUNDLE_FILE),
-                () -> TrustStore.parseCoordinators(this.getConfig(TrustPolicy.COORDINATORS, "")),
+                TrustPolicy::coordinators,
                 () -> this.getConfig(SwitchboardConstants.NETWORK_NAME, ""));
-        if (TrustStore.parseCoordinators(this.getConfig(TrustPolicy.COORDINATORS, "")).isEmpty()) {
-            this.log.warn("no trust coordinator configured (" + TrustPolicy.COORDINATORS + "): every peer with a valid signature counts as trusted");
+        if (TrustPolicy.coordinators().isEmpty()) {
+            this.log.warn(TrustPolicy.signedOnly()
+                    ? "no trust coordinator configured and trust.signedOnly=true: every peer with a valid signature counts as trusted"
+                    : "no trust coordinator configured (" + TrustPolicy.COORDINATORS + "): only documents of this peer count as trusted");
         }
 
         // initialize network database

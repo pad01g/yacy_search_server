@@ -82,6 +82,7 @@ import net.yacy.document.LargeNumberCache;
 import net.yacy.document.LibraryProvider;
 import net.yacy.document.ProbabilisticClassifier;
 import net.yacy.document.Tokenizer;
+import net.yacy.document.parser.html.CharacterCoding;
 import net.yacy.kelondro.data.meta.URIMetadataNode;
 import net.yacy.kelondro.data.word.Word;
 import net.yacy.kelondro.data.word.WordReference;
@@ -1147,7 +1148,7 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
                         final Float scorex = (Float) iEntry.getFieldValue("score"); // this is a special field containing the ranking score of a Solr search result
                         if (scorex != null && scorex > 0) {
                             final double normalized = maxSolrScore > 0.0f ? scorex / maxSolrScore : scorex; // normalize to [0,1] across this peer's batch so scores are comparable across peers
-                            final double coverage = Math.pow(termCoverage(iEntry, coverageTerms, this.snippets.get(urlHash)), coverageExponent);
+                            final double coverage = Math.max(COVERAGE_FLOOR, Math.pow(termCoverage(iEntry, coverageTerms, this.snippets.get(urlHash)), coverageExponent));
                             score = (long) ((1000000.0d * normalized * coverage) - iEntry.urllength());
                         } else
                             score = this.order.cardinal(iEntry);
@@ -2004,14 +2005,29 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
     }
 
     private static final Pattern HTML_TAG = Pattern.compile("<[^>]*>");
+    /** a result that misses query terms is weighted down, but never to zero, so that its Solr ranking still counts */
+    static final double COVERAGE_FLOOR = 0.05d;
 
-    /** unverified results are placed below every verified result, keeping their order among themselves */
-    static final long UNVERIFIED_OFFSET = 1L << 50;
+    /** lower case and NFKC (full/half width forms, like Solr's CJKWidthFilter) for the coverage check */
+    static String normalizeForCoverage(final String s) {
+        return java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
+    }
 
-    /** weight a ranking by the priority of the author; move unverified results behind all verified ones */
+    /** verified rankings are kept within [-LIMIT, LIMIT]; unverified ones below -LIMIT */
+    static final long RANKING_LIMIT = 1L << 60;
+
+    /**
+     * Weight a ranking by the priority of the author and move unverified results behind all verified ones: verified
+     * rankings stay in [-2^60, 2^60], unverified ones are mapped into [-2^62 - 2^58, -2^62 + 2^58], so that the
+     * order holds for any ranking values, and unverified results keep their order among themselves.
+     */
     static long trustRanking(final long ranking, final Provenance.Verdict verdict) {
-        if (verdict == null || !verdict.isTrusted()) return (ranking >> 12) - UNVERIFIED_OFFSET;
-        return (long) (ranking * verdict.weight());
+        final long r = Math.max(-RANKING_LIMIT, Math.min(RANKING_LIMIT, ranking));
+        if (verdict == null || !verdict.isTrusted()) return -(RANKING_LIMIT << 2) + (r >> 2);
+        final double w = verdict.weight();
+        // a lower priority must lower the ranking also when the ranking is negative
+        final long weighted = r >= 0 ? (long) (r * w) : r - (long) (-r * (1.0d - w));
+        return Math.max(-RANKING_LIMIT, weighted);
     }
 
     /**
@@ -2021,10 +2037,14 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
     private List<String> coverageTerms() {
         final List<String> terms = new ArrayList<>();
         if (this.coverageExponent() <= 0) return terms;
+        // coverage is judged from title, url and highlighted text; other content domains have no highlighting
+        if (this.query.contentdom != ContentDomain.TEXT && this.query.contentdom != ContentDomain.ALL) return terms;
         final Iterator<String> i = this.query.getQueryGoal().getIncludeStrings();
         while (i.hasNext()) {
-            final String term = i.next().toLowerCase(Locale.ROOT).trim();
-            if (!term.isEmpty() && !Segment.catchallString.equals(term)) terms.add(term);
+            final String term = normalizeForCoverage(i.next()).trim();
+            // wildcard and fuzzy terms cannot be checked by substring; they count as covered
+            if (term.isEmpty() || Segment.catchallString.equals(term) || term.indexOf('*') >= 0 || term.indexOf('?') >= 0 || term.indexOf('~') >= 0) continue;
+            terms.add(term);
         }
         if (terms.size() < 2) terms.clear();
         return terms;
@@ -2059,7 +2079,7 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         final String body = node.getText();
         if (body != null) text.append(body).append(' ');
         if (snippets != null) for (final String s: snippets) text.append(HTML_TAG.matcher(s).replaceAll("")).append(' ');
-        final String haystack = text.toString().toLowerCase(Locale.ROOT);
+        final String haystack = normalizeForCoverage(CharacterCoding.html2unicode(text.toString()));
         int found = 0;
         for (final String term: terms) if (haystack.contains(term)) found++;
         return ((double) found) / terms.size();
@@ -2077,10 +2097,13 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         // check the author signature here as well (see docs/trust-and-nat.md)
         Provenance.Verdict verdict = resultEntry.getTrustVerdict();
         if (verdict == null) {
-            verdict = resultEntry.verifyProvenance();
+            // remote results are verified when they arrive; this one comes from the own index
+            verdict = resultEntry.verifyProvenanceLocal();
             resultEntry.setTrustVerdict(verdict);
         }
         if (!Provenance.accept(verdict)) return;
+        // a word index entry (e.g. from a DHT transfer) must not attach a document to words its author did not index
+        if (resultEntry.word() != null && !verdict.containsAll(this.query.getQueryGoal().getIncludeHashes())) return;
         final long rankingBoost = isPreferredLocalRichCandidate(resultEntry) ? LOCAL_RICH_TEXT_RANKING_BOOST : 0L;
         final long ranking = trustRanking((this.disablePostRanking ? score : (score * 128) + postRanking(resultEntry, this.ref /*this.getTopicNavigator(MAX_TOPWORDS)*/)) + rankingBoost, verdict);
         // TODO: above was originally using (see below), but getTopicNavigator returns this.ref and possibliy alters this.ref on first call (this.ref.size < 2 -> this.ref.clear)

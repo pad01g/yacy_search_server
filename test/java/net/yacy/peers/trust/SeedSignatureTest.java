@@ -107,12 +107,22 @@ public class SeedSignatureTest {
         final PeerIdentity other = PeerIdentity.forKeys(Ed25519.generate());
         final Seed s = seedOf(id);
         SeedSignature.sign(s, id);
-        final String answer = SeedSignature.answerChallenge(id, "nonce-1");
-        assertTrue(SeedSignature.checkChallenge(s, "nonce-1", answer));
-        assertFalse(SeedSignature.checkChallenge(s, "nonce-2", answer));
+        final String answer = SeedSignature.answerChallenge(id, "nonce-1", "192.0.2.9");
+        assertTrue(SeedSignature.checkChallenge(s, "nonce-1", "192.0.2.9", answer));
+        assertFalse(SeedSignature.checkChallenge(s, "nonce-2", "192.0.2.9", answer));
+        // the answer covers the address the peer saw the request coming from: a forwarded challenge is detected
+        assertFalse(SeedSignature.checkChallenge(s, "nonce-1", "198.51.100.1", answer));
         // a peer at the address that does not own the key cannot answer
-        assertFalse(SeedSignature.checkChallenge(s, "nonce-1", SeedSignature.answerChallenge(other, "nonce-1")));
-        assertFalse(SeedSignature.checkChallenge(s, "nonce-1", null));
+        assertFalse(SeedSignature.checkChallenge(s, "nonce-1", "192.0.2.9", SeedSignature.answerChallenge(other, "nonce-1", "192.0.2.9")));
+        assertFalse(SeedSignature.checkChallenge(s, "nonce-1", "192.0.2.9", null));
+    }
+
+    @Test
+    public void testSafeFieldValues() {
+        assertTrue(SeedSignature.isSafeFieldValue("/ip4/172.30.0.3/tcp/4001/p2p/12D3KooWX/p2p-circuit/p2p/12D3KooWY"));
+        assertFalse(SeedSignature.isSafeFieldValue("a,b"));
+        assertFalse(SeedSignature.isSafeFieldValue("a=b"));
+        assertFalse(SeedSignature.isSafeFieldValue("a\nb"));
     }
 
     @Test

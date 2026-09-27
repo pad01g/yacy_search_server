@@ -73,6 +73,7 @@ import net.yacy.cora.util.ConcurrentLog;
 import net.yacy.http.servlets.MonitorFilter;
 import net.yacy.http.servlets.YaCyDefaultServlet;
 import net.yacy.peers.operation.yacyBuildProperties;
+import net.yacy.peers.trust.TrustPolicy;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
 import net.yacy.server.serverAccessTracker;
@@ -101,6 +102,13 @@ public class Jetty12HttpServer implements YaCyHttpServer {
         this.loginService.setName(bootstrap.adminRealm());
         this.server = createServer(bootstrap.httpPort(), bootstrap.bindHost(), bootstrap.acceptorCount(),
                 sslContext, bootstrap.httpsPort());
+        // requests of other peers carried by the libp2p sidecar come in on their own loopback connector
+        // (see Jetty12SidecarConnector and docs/trust-and-nat.md)
+        if (TrustPolicy.sidecarURL() != null) {
+            final int sidecarPort = switchboard.getConfigInt(TrustPolicy.P2P_SIDECAR_YACY_PORT, TrustPolicy.P2P_SIDECAR_YACY_PORT_DEFAULT);
+            Jetty12SidecarConnector.add(this.server, sidecarPort, bootstrap.acceptorCount(), HttpServerBootstrapConfig.REQUEST_HEADER_SIZE);
+            ConcurrentLog.info("SERVER", "sidecar connector on 127.0.0.1:" + sidecarPort);
+        }
         Handler requestPipeline = createWebAppHandler(this.server, bootstrap, this.loginService);
         if (bootstrap.transparentProxyEnabled()) {
             requestPipeline = Jetty12ProxyChain.wrap(requestPipeline, switchboard);
@@ -238,6 +246,7 @@ public class Jetty12HttpServer implements YaCyHttpServer {
                 final int httpsPort = Switchboard.getSwitchboard().getConfigInt(
                         SwitchboardConstants.SERVER_SSLPORT, 8443);
                 for (final Connector connector : this.server.getConnectors()) {
+                    if (Jetty12SidecarConnector.NAME.equals(connector.getName())) continue; // has its own port
                     final ServerConnector networkConnector = (ServerConnector) connector;
                     final int desiredPort = connector.getName().startsWith("ssl") ? httpsPort : httpPort;
                     if (networkConnector.getPort() != desiredPort) {

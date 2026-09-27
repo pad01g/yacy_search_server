@@ -129,9 +129,9 @@ public class QueryGoal {
         for (String s: this.exclude_strings) parseQuery(s, this.exclude_words, this.exclude_words);
 
         // the word index stores CJK text as bigrams (see WordTokenizer), so the words must be split the same way.
-        // The include/exclude strings stay unsplit: they are sent to Solr as phrases.
+        // The include/exclude strings stay unsplit: they are sent to Solr as phrases. Exclude words are not split:
+        // excluding every bigram of a word would exclude all pages that share any bigram with it.
         splitCJKWords(this.include_words);
-        splitCJKWords(this.exclude_words);
 
         WordCache.learn(this.include_words);
         WordCache.learn(this.exclude_words);
@@ -145,7 +145,11 @@ public class QueryGoal {
         for (final String word: words) if (CJKBigrams.containsCJK(word)) cjk.add(word);
         for (final String word: cjk) {
             words.remove(word);
-            words.addAll(CJKBigrams.split(word));
+            final List<String> parts = CJKBigrams.split(word);
+            // the index does not store single character words (Condenser skips words shorter than 2), so a single
+            // CJK character next to other parts (e.g. "iphone用") would never match; drop it like parseQuery does
+            if (parts.size() > 1) parts.removeIf(p -> p.length() < 2);
+            words.addAll(parts);
         }
     }
 

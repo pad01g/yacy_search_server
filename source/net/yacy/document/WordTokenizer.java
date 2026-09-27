@@ -246,6 +246,29 @@ public class WordTokenizer implements Enumeration<StringBuilder> {
         }
     }
 
+    /**
+     * Approximate character positions of the words of a sentence: words are separated by one character, except
+     * overlapping CJK bigrams, which start one character after the previous bigram of the same run.
+     */
+    static final class Positions {
+        private CharSequence prev = null;
+        private int prevPos = 0;
+
+        int next(final CharSequence word) {
+            final int pos;
+            if (this.prev == null) pos = 0;
+            else if (overlaps(this.prev, word)) pos = this.prevPos + 1;
+            else pos = this.prevPos + this.prev.length() + 1;
+            this.prev = word;
+            this.prevPos = pos;
+            return pos;
+        }
+
+        private static boolean overlaps(final CharSequence a, final CharSequence b) {
+            return a.length() == 2 && b.length() == 2 && CJKBigrams.isCJK(a.charAt(1)) && a.charAt(1) == b.charAt(0) && CJKBigrams.isCJK(b.charAt(0));
+        }
+    }
+
     private static void expandCJK(final List<StringBuilder> tokens) {
         final List<StringBuilder> expanded = new ArrayList<StringBuilder>(tokens.size() * 2);
         for (final StringBuilder token: tokens) {
@@ -286,21 +309,20 @@ public class WordTokenizer implements Enumeration<StringBuilder> {
         final SortedMap<byte[], Integer> map = new TreeMap<byte[], Integer>(Base64Order.enhancedCoder);
         WordTokenizer words = new WordTokenizer(new SentenceReader(sentence), null);
         try {
-            int pos = 0;
+            final Positions positions = new Positions();
             StringBuilder word;
             byte[] hash;
             Integer oldpos;
             while (words.hasMoreElements() && maxlength-- > 0) {
                 word = words.nextElement();
                 hash = Word.word2hash(word);
+                final int pos = positions.next(word);
 
                 // don't overwrite old values, that leads to too far word distances
                 oldpos = map.put(hash, LargeNumberCache.valueOf(pos));
                 if (oldpos != null) {
                     map.put(hash, oldpos);
                 }
-
-                pos += word.length() + 1;
             }
             return map;
         } finally {
@@ -318,19 +340,18 @@ public class WordTokenizer implements Enumeration<StringBuilder> {
         final SortedMap<String, Integer> map = new TreeMap<String, Integer>();
         WordTokenizer words = new WordTokenizer(new SentenceReader(sentence), null);
         try {
-            int pos = 0;
+            final Positions positions = new Positions();
             String word;
             Integer oldpos;
             while (words.hasMoreElements() && maxlength-- > 0) {
                 word = words.nextElement().toString().toLowerCase(Locale.ENGLISH);
+                final int pos = positions.next(word);
 
                 // don't overwrite old values, that leads to too far word distances
                 oldpos = map.put(word, LargeNumberCache.valueOf(pos));
                 if (oldpos != null) {
                     map.put(word, oldpos);
                 }
-
-                pos += word.length() + 1;
             }
             return map;
         } finally {

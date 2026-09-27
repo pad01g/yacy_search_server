@@ -44,6 +44,19 @@ public class CJKBigramsTest {
         assertEquals(Arrays.asList("web3", "財布"), CJKBigrams.split("web3財布"));
     }
 
+    @Test
+    public void testPositionsOfOverlappingBigrams() {
+        final WordTokenizer.Positions p = new WordTokenizer.Positions();
+        // "暗号資産 金融": 暗号 0, 号資 1, 資産 2, 金融 5 (character offsets)
+        assertEquals(0, p.next("暗号"));
+        assertEquals(1, p.next("号資"));
+        assertEquals(2, p.next("資産"));
+        assertEquals(5, p.next("金融"));
+        final WordTokenizer.Positions q = new WordTokenizer.Positions();
+        assertEquals(0, q.next("hello"));
+        assertEquals(6, q.next("world"));
+    }
+
     /**
      * A Japanese clause without spaces used to become a single word, so a query for a part of it never matched.
      */

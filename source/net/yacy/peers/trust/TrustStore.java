@@ -50,6 +50,8 @@ public final class TrustStore {
     /** stop storing envelopes beyond this number (protection against flooding) */
     static final int MAX_ENVELOPES = 512;
     static final int MAX_PEERS_PER_LIST = 10000;
+    /** versions above this are rejected, so that sums of versions cannot overflow */
+    static final long MAX_VERSION = 1L << 40;
 
     public static final class Entry {
         public final String publicKey;
@@ -108,6 +110,11 @@ public final class TrustStore {
         return store;
     }
 
+    /** for tests */
+    static void setInstance(final TrustStore store) {
+        instance = store;
+    }
+
     /** @return the store of this peer, or null before init (unit tests, tools) */
     public static TrustStore get() {
         return instance;
@@ -160,20 +167,25 @@ public final class TrustStore {
      * @return true if the envelope was new and replaced an older version
      */
     public synchronized boolean add(final TrustEnvelope e) {
-        if (size() >= MAX_ENVELOPES) return false;
+        // statements for other networks are neither used nor stored: a higher version for another network must not
+        // block the versions of ours, and a revocation for another network must not revoke an operator here
+        if (!e.appliesTo(this.network.get())) return false;
+        if (e.version > MAX_VERSION) return false;
         final List<String> coords = this.coordinators.get();
         if (TrustEnvelope.TYPE_DELEGATION.equals(e.type)) {
             if (!coords.contains(e.signer)) return false;
             final String operator = canonicalKey(e.payload.optString("operator", null));
             if (operator == null) return false;
-            final Map<String, TrustEnvelope> byOperator = this.delegations.computeIfAbsent(e.signer, k -> new TreeMap<>());
-            final TrustEnvelope old = byOperator.get(operator);
+            final Map<String, TrustEnvelope> byOperator = this.delegations.get(e.signer);
+            final TrustEnvelope old = byOperator == null ? null : byOperator.get(operator);
             if (old != null && old.version >= e.version) return false;
-            byOperator.put(operator, e);
+            if (old == null && size() >= MAX_ENVELOPES) return false; // only new signers count against the limit
+            this.delegations.computeIfAbsent(e.signer, k -> new TreeMap<>()).put(operator, e);
         } else if (TrustEnvelope.TYPE_PEERLIST.equals(e.type)) {
-            if (!isOperator(e.signer, coords)) return false;
+            if (!isActiveOperator(e.signer, coords)) return false;
             final TrustEnvelope old = this.lists.get(e.signer);
             if (old != null && old.version >= e.version) return false;
+            if (old == null && size() >= MAX_ENVELOPES) return false;
             if (e.payload.optJSONArray("peers") == null) return false;
             this.lists.put(e.signer, e);
         } else {
@@ -183,12 +195,16 @@ public final class TrustStore {
         return true;
     }
 
-    /** @return true if the key is a configured coordinator or has a delegation from one (revoked or not) */
-    private boolean isOperator(final String key, final List<String> coords) {
-        if (coords.contains(key)) return true;
+    /** @return true if the key is a configured coordinator or has a delegation from one that is not revoked */
+    private boolean isActiveOperator(final String key, final List<String> coords) {
         for (final String c : coords) {
             final Map<String, TrustEnvelope> byOperator = this.delegations.get(c);
-            if (byOperator != null && byOperator.containsKey(key)) return true;
+            final TrustEnvelope d = byOperator == null ? null : byOperator.get(key);
+            if (d != null) {
+                if (!d.payload.optBoolean("revoked", false)) return true;
+            } else if (c.equals(key)) {
+                return true; // a coordinator signs for itself unless it revoked itself
+            }
         }
         return false;
     }

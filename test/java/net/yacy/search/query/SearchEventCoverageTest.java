@@ -1,6 +1,7 @@
 package net.yacy.search.query;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.net.MalformedURLException;
 import java.util.Arrays;
@@ -49,6 +50,21 @@ public class SearchEventCoverageTest {
     public void testCJKSubstring() throws MalformedURLException {
         final URIMetadataNode n = node("http://example.org/c.html", "暗号資産交換業者の登録制度について");
         assertEquals(2.0d / 3.0d, SearchEvent.termCoverage(n, Arrays.asList("暗号資産交換業", "登録", "金融庁"), null), 1e-9);
+    }
+
+    @Test
+    public void testEntitiesAndWidthForms() throws MalformedURLException {
+        final URIMetadataNode n = node("http://example.org/e.html", "ＥＲＣ-4337 &amp; bundler");
+        assertEquals(1.0d, SearchEvent.termCoverage(n, Arrays.asList(SearchEvent.normalizeForCoverage("erc-4337"), "&", "bundler"), null), 0.0d);
+    }
+
+    @Test
+    public void testTrustRanking() {
+        final net.yacy.peers.trust.Provenance.Verdict self = net.yacy.peers.trust.Provenance.localDocument();
+        assertEquals(1000L, SearchEvent.trustRanking(1000L, self));
+        // unverified results always rank below verified ones, whatever their own ranking
+        assertTrue(SearchEvent.trustRanking(Long.MAX_VALUE / 2, null) < SearchEvent.trustRanking(-1000000L, self));
+        assertTrue(SearchEvent.trustRanking(-10L, null) < SearchEvent.trustRanking(-1000000L, self));
     }
 
     @Test

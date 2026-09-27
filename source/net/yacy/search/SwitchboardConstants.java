@@ -707,6 +707,30 @@ public final class SwitchboardConstants {
     public static final String SEARCH_RANKING_SOLR_DOUBLEDETECTION_QUANTRATE = "search.ranking.solr.doubledetection.quantrate";
 
     /**
+     * Solr minimum match (edismax mm) for queries with more than one term. Also sent to remote peers with the
+     * Solr query, so it is the setting of the peer that starts the search that applies.
+     * Upstream used "1", which turns every multi-term query into an OR query.
+     */
+    public static final String SEARCH_RANKING_SOLR_MM = "search.ranking.solr.mm";
+    public static final String SEARCH_RANKING_SOLR_MM_DEFAULT = "3<-1 5<80%";
+    /** minimum match for queries containing Chinese, Japanese or Korean terms */
+    public static final String SEARCH_RANKING_SOLR_MM_CJK = "search.ranking.solr.mm.cjk";
+    public static final String SEARCH_RANKING_SOLR_MM_CJK_DEFAULT = "100%";
+    /**
+     * Solr results are multiplied by (matched query terms / all query terms) ^ exponent, where a term matches if it
+     * appears in the title, URL, description, keywords or the highlighted snippets. 0 switches this off.
+     */
+    public static final String SEARCH_RANKING_COVERAGE_EXPONENT = "search.ranking.coverage.exponent";
+    public static final int SEARCH_RANKING_COVERAGE_EXPONENT_DEFAULT = 2;
+
+    /**
+     * minimum age in days of a peer to be asked in a remote DHT (RWI) search. Upstream hard-codes 3, which means that
+     * a network of new peers never searches the word indexes of the other peers.
+     */
+    public static final String REMOTESEARCH_DHT_MINAGE = "remotesearch.dht.minage";
+    public static final int REMOTESEARCH_DHT_MINAGE_DEFAULT = 3;
+
+    /**
      * boosts for different cores (add an number to the end of the property name)
      */
     public static final String SEARCH_RANKING_SOLR_COLLECTION_BOOSTNAME_         = "search.ranking.solr.collection.boostname.tmpa."; // temporary until we know best default values; add the index number (0..3) to that string

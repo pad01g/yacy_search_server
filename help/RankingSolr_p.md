@@ -42,6 +42,19 @@ Ranking and analysis pages expose the signals that influence result order or ret
 | `EnterBoosts` | boost=. | `Set Field Boosts` |
 | `ResetBoosts` | boost=. | `Re-Set to default` |
 
+## Related Settings Outside This Page
+
+These keys are set in `defaults/yacy.init` and can be changed with `/ConfigProperties_p.html`. They apply to every Solr search this peer starts, including the Solr queries it sends to remote peers, because remote peers use the `mm` value of the request.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `search.ranking.solr.mm` | `3<-1 5<80%` | edismax minimum match for queries with more than one term: up to 3 terms all must match, 4-5 terms all but one, more terms 80%. `1` makes every multi-term query an OR query. |
+| `search.ranking.solr.mm.cjk` | `100%` | Minimum match for queries with Chinese, Japanese or Korean terms. |
+| `search.ranking.coverage.exponent` | `2` | Solr results are weighted by (query terms found in title, URL, description, keywords or highlighted snippets / all query terms) to this power, after each peer's scores are normalized. `0` switches the weighting off. |
+| `remotesearch.dht.minage` | `3` | Minimum age in days of a peer to be asked in a remote word index (DHT) search. |
+
+The Solr field type `text_general` splits Chinese, Japanese and Korean text into overlapping bigrams (`CJKBigramFilter`), and the word index uses the same bigrams. Documents indexed before this change must be re-indexed to be found by CJK queries.
+
 ## Correct Use
 
 Use representative test queries or documents. Ranking, analysis, and AI settings are meaningful only when their effect can be compared. Keep notes about changed weights, model choices, fields, or thresholds.

@@ -76,6 +76,8 @@ import net.yacy.kelondro.index.RowHandleSet;
 import net.yacy.kelondro.util.Bitfield;
 import net.yacy.kelondro.util.SetTools;
 import net.yacy.peers.Seed;
+import net.yacy.search.Switchboard;
+import net.yacy.search.SwitchboardConstants;
 import net.yacy.search.index.Segment;
 import net.yacy.search.navigator.NavigatorPlugins;
 import net.yacy.search.navigator.NavigatorSort;
@@ -636,8 +638,9 @@ public final class QueryParams {
         final SolrQuery params = getBasicParams(getFacets, filterQueries);
         int rankingProfile = this.ranking.coeff_date == RankingProfile.COEFF_MAX ? 1 : (this.modifier.sitehash != null || this.modifier.sitehost != null) ? 2 : 0;
         params.setQuery(this.queryGoal.collectionTextQuery().toString());
-        if (this.queryGoal.getIncludeSize() > 1) {
-            params.setParam(DisMaxParams.MM, "1");
+        final int termCount = this.queryGoal.getIncludeStringsSize();
+        if (termCount > 1) {
+            params.setParam(DisMaxParams.MM, minimumMatch(this.queryGoal));
         }
         Ranking actRanking = indexSegment.fulltext().getDefaultConfiguration().getRanking(rankingProfile); // for a by-date ranking select different ranking profile
 
@@ -646,10 +649,11 @@ public final class QueryParams {
         String bf = actRanking.getBoostFunction();
         final String qf = actRanking.getQueryFields();
         if (!qf.isEmpty()) params.setParam(DisMaxParams.QF, qf);
-        if (this.queryGoal.getIncludeSize() > 1) {
-            // add boost on combined words
+        if (termCount > 1) {
+            // add boost on combined words, strongest when the whole query appears as a phrase in the title
             if (bq.length() > 0) bq += "\n";
             bq += CollectionSchema.text_t.getSolrFieldName() + ":\"" + this.queryGoal.getIncludeString() + "\"^10";
+            bq += "\n" + CollectionSchema.title.getSolrFieldName() + ":\"" + this.queryGoal.getIncludeString() + "\"^20";
         }
         if (fq.length() > 0) {
             String[] oldfq = params.getFilterQueries();
@@ -682,6 +686,22 @@ public final class QueryParams {
         return params;
     }
     
+    /**
+     * The Solr minimum match (edismax mm) for a query with more than one term. Remote peers receive this value
+     * with the query, so the configuration of the searching peer applies to the whole network search.
+     * CJK queries get their own value: their terms are split into many short tokens, and a partial match of
+     * those is nearly always a false hit.
+     */
+    static String minimumMatch(final QueryGoal goal) {
+        final Switchboard sb = Switchboard.getSwitchboard();
+        if (goal.containsCJK()) {
+            return sb == null ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK_DEFAULT
+                    : sb.getConfig(SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK, SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK_DEFAULT);
+        }
+        return sb == null ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_DEFAULT
+                : sb.getConfig(SwitchboardConstants.SEARCH_RANKING_SOLR_MM, SwitchboardConstants.SEARCH_RANKING_SOLR_MM_DEFAULT);
+    }
+
     private SolrQuery solrImageQuery(final boolean getFacets, final boolean strictContentDom) {
         if (this.cachedQuery != null) {
             this.cachedQuery.setStart(this.offset);

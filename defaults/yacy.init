@@ -1034,6 +1034,8 @@ search.jsresort = true
 # remote search details
 remotesearch.maxcount = 10
 remotesearch.maxtime = 3000
+# minimum age in days of peers that are asked in a remote DHT (RWI) search
+remotesearch.dht.minage = 3
 remotesearch.result.store=true
 # Maximum size allowed (in bytes) for a remote document result to be stored to local index. Defaults to -1, which means no limit.
 remotesearch.result.store.maxsize=-1
@@ -1180,6 +1182,17 @@ search.publicTopNavBar.login = true
 # we will support different search profiles
 # If this profile setting is empty, a hard-coded profile is used to initialise the values
 search.ranking.rwi.profile =
+
+# Solr minimum match (edismax mm) for queries with more than one term.
+# The value is sent along with remote Solr searches, so the searching peer decides.
+# "3<-1 5<80%": up to 3 terms all must match, 4-5 terms all but one, more than 5 terms 80%.
+search.ranking.solr.mm = 3<-1 5<80%
+# minimum match for queries with Chinese, Japanese or Korean terms
+search.ranking.solr.mm.cjk = 100%
+# Solr results are multiplied by (matched query terms / all query terms) ^ exponent, counting
+# a term if it appears in title, url, description, keywords or highlighted snippets. 0 = off
+search.ranking.coverage.exponent = 2
+
 # The boost fields contains all fields which shall be searched together with a boost. non-mentioned fields are not searched.
 
 # Boost queries are added to all queries; functions evaluate a value which is either added or multiplied with the ranking.

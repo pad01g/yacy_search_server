@@ -27,6 +27,8 @@
 package net.yacy.search.query;
 
 import java.net.MalformedURLException;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.ConcurrentModificationException;
@@ -36,6 +38,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
@@ -1002,6 +1005,11 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
             final Float s = (Float) node.getFieldValue("score");
             if (s != null && s > maxSolrScore) maxSolrScore = s;
         }
+        // The normalization above lifts the best document of every peer to 1.0, even when that peer only has
+        // documents with some of the query terms. Weighting by term coverage keeps such documents below
+        // documents that contain all terms.
+        final List<String> coverageTerms = this.coverageTerms();
+        final int coverageExponent = this.coverageExponent();
 
         long timer = System.currentTimeMillis();
 
@@ -1136,9 +1144,11 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
                         // determine nodestack ranking (will be altered by postranking)
                         // so far Solr score is used (with abitrary factor to get value similar to rwi ranking values)
                         final Float scorex = (Float) iEntry.getFieldValue("score"); // this is a special field containing the ranking score of a Solr search result
-                        if (scorex != null && scorex > 0)
-                            score = (long) ((1000000.0f * (maxSolrScore > 0.0f ? scorex / maxSolrScore : scorex)) - iEntry.urllength()); // normalize to [0,1] across this peer's batch so scores are comparable across peers
-                        else
+                        if (scorex != null && scorex > 0) {
+                            final double normalized = maxSolrScore > 0.0f ? scorex / maxSolrScore : scorex; // normalize to [0,1] across this peer's batch so scores are comparable across peers
+                            final double coverage = Math.pow(termCoverage(iEntry, coverageTerms, this.snippets.get(urlHash)), coverageExponent);
+                            score = (long) ((1000000.0d * normalized * coverage) - iEntry.urllength());
+                        } else
                             score = this.order.cardinal(iEntry);
                         this.nodeStack.put(new ReverseElement<>(iEntry, score)); // inserts the element and removes the worst (which is smallest)
                         break rankingtryloop;
@@ -1990,6 +2000,59 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
             }
         }
         return success;
+    }
+
+    private static final Pattern HTML_TAG = Pattern.compile("<[^>]*>");
+
+    /**
+     * @return the lower cased query terms as the user wrote them, or an empty list if coverage weighting does
+     *         not apply (single term queries, or switched off by configuration)
+     */
+    private List<String> coverageTerms() {
+        final List<String> terms = new ArrayList<>();
+        if (this.coverageExponent() <= 0) return terms;
+        final Iterator<String> i = this.query.getQueryGoal().getIncludeStrings();
+        while (i.hasNext()) {
+            final String term = i.next().toLowerCase(Locale.ROOT).trim();
+            if (!term.isEmpty() && !Segment.catchallString.equals(term)) terms.add(term);
+        }
+        if (terms.size() < 2) terms.clear();
+        return terms;
+    }
+
+    private int coverageExponent() {
+        final Switchboard sb = Switchboard.getSwitchboard();
+        return sb == null ? SwitchboardConstants.SEARCH_RANKING_COVERAGE_EXPONENT_DEFAULT
+                : sb.getConfigInt(SwitchboardConstants.SEARCH_RANKING_COVERAGE_EXPONENT, SwitchboardConstants.SEARCH_RANKING_COVERAGE_EXPONENT_DEFAULT);
+    }
+
+    /**
+     * The share of query terms that appear in the visible parts of a Solr result: title, URL, description,
+     * keywords, the text if it was delivered and the highlighted snippets. The snippets contain the passages
+     * where Solr matched the body text, so a term that is only in the body is still found.
+     * @param terms lower cased query terms; if empty, the coverage is 1
+     * @return a value in [0, 1]
+     */
+    static double termCoverage(final URIMetadataNode node, final List<String> terms, final Collection<String> snippets) {
+        if (terms == null || terms.isEmpty()) return 1.0d;
+        final StringBuilder text = new StringBuilder(512);
+        text.append(node.title()).append(' ');
+        try {
+            text.append(URLDecoder.decode(node.url().toNormalform(true), StandardCharsets.UTF_8)).append(' ');
+        } catch (final IllegalArgumentException e) {
+            text.append(node.url().toNormalform(true)).append(' ');
+        }
+        final List<String> descriptions = node.getDescription();
+        if (descriptions != null) for (final String d: descriptions) text.append(d).append(' ');
+        final String keywords = node.dc_subject();
+        if (keywords != null) text.append(keywords).append(' ');
+        final String body = node.getText();
+        if (body != null) text.append(body).append(' ');
+        if (snippets != null) for (final String s: snippets) text.append(HTML_TAG.matcher(s).replaceAll("")).append(' ');
+        final String haystack = text.toString().toLowerCase(Locale.ROOT);
+        int found = 0;
+        for (final String term: terms) if (haystack.contains(term)) found++;
+        return ((double) found) / terms.size();
     }
 
     /**

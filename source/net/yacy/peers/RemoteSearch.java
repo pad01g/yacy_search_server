@@ -190,12 +190,16 @@ public class RemoteSearch extends Thread {
         if (Memory.getSystemLoadAverage() > 2.0) {redundancy = Math.max(1, redundancy - 1); healthMessage.append(", load() > 2.0");}
         if (Memory.cores() < 4) {redundancy = Math.max(1, redundancy - 1); healthMessage.append(", cores() < 4");}
         if (Memory.cores() == 1) {redundancy = 1; healthMessage.append(", cores() == 1");}
-        final int minage = 3;
+        final int minage = Math.max(0, sb.getConfigInt(SwitchboardConstants.REMOTESEARCH_DHT_MINAGE, SwitchboardConstants.REMOTESEARCH_DHT_MINAGE_DEFAULT));
         final int minRWIWordCount = 1; // we exclude seeds with empty or disabled RWI from remote RWI search
         int robinsoncount = event.peers.scheme.verticalPartitions() * redundancy / 2;
         if (indexingQueueSize > 0) robinsoncount = Math.max(1, robinsoncount / 2);
         if (indexingQueueSize > 10) robinsoncount = Math.max(1, robinsoncount / 2);
         if (indexingQueueSize > 50) robinsoncount = Math.max(1, robinsoncount / 2);
+        // Networks this small do not distribute the word index (SeedDB.noDHTActivity) because every peer can be asked
+        // directly. The formula above gives 0 extra peers for one partition with redundancy 1, and fewer than all peers
+        // in other small configurations, so ask all connected peers instead.
+        if (event.peers.noDHTActivity()) robinsoncount = Math.max(robinsoncount, event.peers.sizeConnected());
         if (shortmem) {redundancy = 1; robinsoncount = Math.max(1, robinsoncount / 2); healthMessage.append(", shortmem");}
         
         

@@ -77,4 +77,16 @@ public class CJKBigramsTest {
         assertTrue(words.contains("FSA"));
         assertFalse(words.contains("暗号資産交換業者の登録について"));
     }
+
+    @Test
+    public void testWordCount() {
+        assertEquals(0, CJKBigrams.wordCount(""));
+        assertEquals(4, CJKBigrams.wordCount("Hello, world: two more"));
+        assertEquals(3, CJKBigrams.wordCount("state-of the"));
+        // 6 CJK characters count as 3 words, plus "FSA"
+        assertEquals(4, CJKBigrams.wordCount("暗号資産交換 FSA"));
+        // a run of 5 counts as 3
+        assertEquals(3, CJKBigrams.wordCount("ステーブル"));
+        assertEquals(2, CJKBigrams.wordCount("abc金"));
+    }
 }

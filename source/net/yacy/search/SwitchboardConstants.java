@@ -723,6 +723,16 @@ public final class SwitchboardConstants {
     public static final String SEARCH_RANKING_COVERAGE_EXPONENT = "search.ranking.coverage.exponent";
     /** boost (edismax bq) of the whole query as a phrase in the title; 0 switches it off */
     public static final String SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST = "search.ranking.solr.titlePhraseBoost";
+    /**
+     * Thin content: results with fewer words than this are weighted by (words / this value) ^ exponent, at least
+     * {@link #SEARCH_RANKING_THIN_FLOOR}. Pages that repeat the query in the title but have little text (tag lists,
+     * doorway pages) otherwise rank first, because title and h1 weigh much more than the text. 0 switches it off.
+     */
+    public static final String SEARCH_RANKING_THIN_WORDS = "search.ranking.thin.words";
+    public static final int SEARCH_RANKING_THIN_WORDS_DEFAULT = 100;
+    public static final String SEARCH_RANKING_THIN_EXPONENT = "search.ranking.thin.exponent";
+    public static final float SEARCH_RANKING_THIN_EXPONENT_DEFAULT = 1.0f;
+    public static final double SEARCH_RANKING_THIN_FLOOR = 0.1d;
     public static final float SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT = 20f;
     public static final int SEARCH_RANKING_COVERAGE_EXPONENT_DEFAULT = 2;
 

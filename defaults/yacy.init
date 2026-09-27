@@ -1222,6 +1222,10 @@ search.ranking.solr.mm.cjk = 2<-1 5<80%
 search.ranking.coverage.exponent = 2
 # boost of the whole query as a phrase in the title (sent to remote peers with the query). 0 = off
 search.ranking.solr.titlePhraseBoost = 20
+# thin content: results with fewer words than search.ranking.thin.words are weighted by
+# (words / search.ranking.thin.words) ^ search.ranking.thin.exponent (at least 0.1). 0 = off
+search.ranking.thin.words = 100
+search.ranking.thin.exponent = 1.0
 
 # The boost fields contains all fields which shall be searched together with a boost. non-mentioned fields are not searched.
 

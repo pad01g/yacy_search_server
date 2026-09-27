@@ -72,4 +72,27 @@ public class SearchEventCoverageTest {
         final URIMetadataNode n = node("http://example.org/d.html", "anything");
         assertEquals(1.0d, SearchEvent.termCoverage(n, Collections.emptyList(), null), 0.0d);
     }
+
+    @Test
+    public void testThinWeight() {
+        assertEquals(1.0d, SearchEvent.thinWeight(150, 100, 1.0d), 0.0d);
+        assertEquals(1.0d, SearchEvent.thinWeight(100, 100, 1.0d), 0.0d);
+        assertEquals(0.4d, SearchEvent.thinWeight(40, 100, 1.0d), 1e-9);
+        assertEquals(0.2d, SearchEvent.thinWeight(4, 100, 0.5d), 1e-9);
+        // floor, unknown count, switched off
+        assertEquals(0.1d, SearchEvent.thinWeight(1, 100, 1.0d), 0.0d);
+        assertEquals(1.0d, SearchEvent.thinWeight(0, 100, 1.0d), 0.0d);
+        assertEquals(1.0d, SearchEvent.thinWeight(10, 0, 1.0d), 0.0d);
+        assertEquals(1.0d, SearchEvent.thinWeight(10, 100, 0.0d), 0.0d);
+    }
+
+    @Test
+    public void testThinRankingLowersPositiveAndNegative() {
+        assertEquals(400L, SearchEvent.thinRanking(1000L, 40, 100, 1.0d));
+        assertTrue(SearchEvent.thinRanking(-1000L, 40, 100, 1.0d) < -1000L);
+        assertEquals(1000L, SearchEvent.thinRanking(1000L, 200, 100, 1.0d));
+        // no overflow at the limits
+        assertTrue(SearchEvent.thinRanking(Long.MAX_VALUE, 40, 100, 1.0d) > 0);
+        assertTrue(SearchEvent.thinRanking(Long.MIN_VALUE, 40, 100, 1.0d) < 0);
+    }
 }

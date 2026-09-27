@@ -73,6 +73,42 @@ public final class CJKBigrams {
      * @param token a token without white space
      * @return the parts in their original order; the token itself if it has no CJK characters
      */
+    /**
+     * The number of words of a text: runs of letters or digits separated by other characters. Chinese, Japanese and
+     * Korean text has no spaces; a run of n CJK characters counts as n / 2 words (rounded up), about the average
+     * word length. Counting spaces (as before) gave a whole CJK paragraph the count 1.
+     */
+    public static int wordCount(final CharSequence text) {
+        if (text == null) return 0;
+        int words = 0;
+        int cjkRun = 0;
+        boolean inWord = false;
+        for (int i = 0; i < text.length(); i++) {
+            final char c = text.charAt(i);
+            if (isCJK(c)) {
+                if (inWord) {
+                    words++;
+                    inWord = false;
+                }
+                cjkRun++;
+                continue;
+            }
+            if (cjkRun > 0) {
+                words += (cjkRun + 1) / 2;
+                cjkRun = 0;
+            }
+            if (Character.isLetterOrDigit(c)) {
+                inWord = true;
+            } else if (inWord) {
+                words++;
+                inWord = false;
+            }
+        }
+        if (inWord) words++;
+        if (cjkRun > 0) words += (cjkRun + 1) / 2;
+        return words;
+    }
+
     public static List<String> split(final String token) {
         final List<String> parts = new ArrayList<>();
         if (!containsCJK(token)) {

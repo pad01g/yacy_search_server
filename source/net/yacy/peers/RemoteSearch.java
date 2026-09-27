@@ -247,7 +247,11 @@ public class RemoteSearch extends Thread {
         if (dhtPeers == null) dhtPeers = new HashSet<Seed>();
 
         // select node targets
-        final Collection<Seed> robinsonPeers = DHTSelection.selectExtraTargets(event.peers, event.query.getQueryGoal().getIncludeHashes(), minage, dhtPeers, robinsoncount, random);
+        // In networks without DHT transfer a peer's word index holds only its own documents, which its Solr index has
+        // too; the word index needs every query term, Solr allows one to be missing (search.ranking.solr.mm). Ask DHT
+        // targets over Solr as well, otherwise their documents that miss a term are never found.
+        final Collection<Seed> solrOmit = event.peers.noDHTActivity() ? null : dhtPeers;
+        final Collection<Seed> robinsonPeers = DHTSelection.selectExtraTargets(event.peers, event.query.getQueryGoal().getIncludeHashes(), minage, solrOmit, robinsoncount, random);
         
         if (event.peers != null) {
             if (sb.getConfigBool(SwitchboardConstants.DEBUG_SEARCH_REMOTE_DHT_TESTLOCAL, false)) {

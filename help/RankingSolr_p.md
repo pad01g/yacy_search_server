@@ -52,7 +52,11 @@ These keys are set in `defaults/yacy.init` and can be changed with `/ConfigPrope
 | `search.ranking.solr.mm.cjk` | `2<-1 5<80%` | Minimum match for queries with Chinese, Japanese or Korean terms. Each CJK term is matched as a phrase of bigrams. |
 | `search.ranking.coverage.exponent` | `2` | Solr results are weighted by (query terms found in title, URL, description, keywords or highlighted snippets / all query terms) to this power, after each peer's scores are normalized. `0` switches the weighting off. |
 | `search.ranking.solr.titlePhraseBoost` | `20` | Boost (edismax `bq`) for documents whose title contains the whole query as a phrase. Sent to remote peers with the query. `0` switches it off. |
+| `search.ranking.thin.words` | `100` | Thin content: results with fewer words than this are weighted by (words / this value) ^ `search.ranking.thin.exponent`, at least 0.1. Title and h1 weigh much more than the text, so pages that repeat the query in the title but have little text (tag lists, doorway pages) would otherwise rank first. `0` switches it off. Applies to local and remote results of text searches. |
+| `search.ranking.thin.exponent` | `1.0` | Exponent of the thin content weighting. |
 | `remotesearch.dht.minage` | `3` | Minimum age in days of a peer to be asked in a remote word index (DHT) search. |
+
+The word count of a document (`wordcount_i`) counts a run of Chinese, Japanese or Korean characters as one word per two characters; it used to count spaces, which gave a whole CJK paragraph the count 1.
 
 The Solr field type `text_general` splits Chinese, Japanese and Korean text into overlapping bigrams (`CJKBigramFilter`), and the word index uses the same bigrams. Documents indexed before this change must be re-indexed to be found by CJK queries.
 

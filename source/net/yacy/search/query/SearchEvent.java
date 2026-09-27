@@ -240,6 +240,9 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
     private final boolean pollImmediately;
     /** Disable post-ranking when operating in explicit local-search mode. */
     private final boolean disablePostRanking;
+    /** thin content weighting, see {@link SwitchboardConstants#SEARCH_RANKING_THIN_WORDS} */
+    private final int thinWords;
+    private final double thinExponent;
     public  final boolean excludeintext_image;
 
     // the following values are filled during the search process as statistics for the search
@@ -444,6 +447,12 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         this.snippetFetchAlive = new AtomicInteger(0);
         this.addRunning = true;
         this.disablePostRanking = this.query.isLocal();
+        // only text search results have a meaningful word count
+        final boolean text = this.query.contentdom == ContentDomain.TEXT || this.query.contentdom == ContentDomain.ALL;
+        final Switchboard thinSb = Switchboard.getSwitchboard();
+        this.thinWords = !text || thinSb == null ? 0 : thinSb.getConfigInt(SwitchboardConstants.SEARCH_RANKING_THIN_WORDS, SwitchboardConstants.SEARCH_RANKING_THIN_WORDS_DEFAULT);
+        this.thinExponent = thinSb == null ? SwitchboardConstants.SEARCH_RANKING_THIN_EXPONENT_DEFAULT
+                : thinSb.getConfigFloat(SwitchboardConstants.SEARCH_RANKING_THIN_EXPONENT, SwitchboardConstants.SEARCH_RANKING_THIN_EXPONENT_DEFAULT);
         this.receivedRemoteReferences = new AtomicInteger(0);
         this.order = new ReferenceOrder(this.query.ranking, this.query.targetlang);
         this.urlhashes = new RowHandleSet(Word.commonHashLength, Word.commonHashOrder, 100);
@@ -2013,6 +2022,24 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         return java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * @return the weight of a result with this many words of text: 1 at or above thinWords, else
+     *         (words / thinWords) ^ exponent, at least {@link SwitchboardConstants#SEARCH_RANKING_THIN_FLOOR}. An
+     *         unknown count (0: not delivered, or a document without text such as an image) weighs 1.
+     */
+    static double thinWeight(final int words, final int thinWords, final double exponent) {
+        if (thinWords <= 0 || !(exponent > 0) || words <= 0 || words >= thinWords) return 1.0d;
+        return Math.max(SwitchboardConstants.SEARCH_RANKING_THIN_FLOOR, Math.pow((double) words / thinWords, exponent));
+    }
+
+    /** weight a ranking by {@link #thinWeight}; a lower weight lowers also a negative ranking */
+    static long thinRanking(final long ranking, final int words, final int thinWords, final double exponent) {
+        final double w = thinWeight(words, thinWords, exponent);
+        if (w >= 1.0d) return ranking;
+        final long r = Math.max(-RANKING_LIMIT, Math.min(RANKING_LIMIT, ranking));
+        return r >= 0 ? (long) (r * w) : r - (long) (-r * (1.0d - w));
+    }
+
     /** verified rankings are kept within [-LIMIT, LIMIT]; unverified ones below -LIMIT */
     static final long RANKING_LIMIT = 1L << 60;
 
@@ -2105,7 +2132,8 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         // a word index entry (e.g. from a DHT transfer) must not attach a document to words its author did not index
         if (resultEntry.word() != null && !verdict.containsAll(this.query.getQueryGoal().getIncludeHashes())) return;
         final long rankingBoost = isPreferredLocalRichCandidate(resultEntry) ? LOCAL_RICH_TEXT_RANKING_BOOST : 0L;
-        final long ranking = trustRanking((this.disablePostRanking ? score : (score * 128) + postRanking(resultEntry, this.ref /*this.getTopicNavigator(MAX_TOPWORDS)*/)) + rankingBoost, verdict);
+        final long raw = (this.disablePostRanking ? score : (score * 128) + postRanking(resultEntry, this.ref /*this.getTopicNavigator(MAX_TOPWORDS)*/)) + rankingBoost;
+        final long ranking = trustRanking(thinRanking(raw, resultEntry.wordCount(), this.thinWords, this.thinExponent), verdict);
         // TODO: above was originally using (see below), but getTopicNavigator returns this.ref and possibliy alters this.ref on first call (this.ref.size < 2 -> this.ref.clear)
         // TODO: verify and straighten the use of addTopic, getTopic and getTopicNavigator and related score calculation
         // final long ranking = ((long) (score * 128.f)) + postRanking(resultEntry, this.getTopicNavigator(MAX_TOPWORDS));

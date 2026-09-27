@@ -25,10 +25,9 @@ docker compose の閉じた P2P 網を立てて測っている（検索品質: u
 | 4 | Solr で漢字・かなが 1 文字ずつの token になる | `text_general` が StandardTokenizer のみ | `CJKWidthFilter` + `CJKBigramFilter` を追加 | 同上 |
 | 5 | 新しいピアだけの網では他ピアの単語索引を検索しない | DHT 検索先の最低年齢が 3 日で固定 | `remotesearch.dht.minage`（既定 3）で設定可能に | Search all peers of small networks ... |
 | 6 | パーティション 1・冗長度 1 の網では他ピアへ Solr 検索が 1 件も飛ばない | 追加の検索先数 = パーティション数 × 冗長度 / 2 が 0 になる | 32 ピア以下の網（DHT 転送をしない規模）では接続中の全ピアに問い合わせる | 同上 |
+| 7 | 全語をタイトルに持つが本文の薄い頁（タグ一覧など）が上位に来る | 既定の `qf` で title^15・h1^11 に対して本文 text_t^1。mm も被覆率も全語を含む頁は通す | 本文が `search.ranking.thin.words`（既定 100）語未満の結果に (語数 / 100) の重みを掛ける（下限 0.1）。CJK の語数は 2 文字で 1 語と数える（従来は空白の数で、CJK の段落は 1 語だった） | Weight down thin pages |
+| 8 | 既定の検索で、言い換えの正解（クエリ語が 1 つ欠ける頁）を落とす | 小さな網では他ピアを DHT 検索先にすると Solr の追加問い合わせ先から外す。単語索引の検索は全語を要求する | DHT 転送をしない規模の網では、DHT 検索先にも Solr で問い合わせる | 同上 |
 | - | `docker build -f docker/Dockerfile .` が失敗する | `.dockerignore` が `test/` を丸ごと除外するが、ビルドは `test/jetty` を使う | `test/jetty` を除外対象から外す | Keep test/jetty in the Docker build context |
-
-**残っている弱点:** クエリの全語をタイトルに持つが本文の薄い頁（タグ一覧など）は、mm も被覆率の重みも通り抜けて上位に来る
-（yacy-lab で全 11 クエリの上位 5 件に入る。upstream も同じ）。本文の薄さで減点する仕組みは未実装。
 
 設定値の説明は `help/RankingSolr_p.md` の "Related Settings Outside This Page" にある。
 

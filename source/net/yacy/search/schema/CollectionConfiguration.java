@@ -945,13 +945,7 @@ public class CollectionConfiguration extends SchemaConfiguration implements Seri
         // content (must be written after special parser data, since this can influence the content)
         if (allAttr || this.contains(CollectionSchema.text_t)) this.add(doc, CollectionSchema.text_t, content);
         if (allAttr || this.contains(CollectionSchema.wordcount_i)) {
-            if (content.length() == 0) {
-                this.add(doc, CollectionSchema.wordcount_i, 0);
-            } else {
-                int contentwc = 1;
-                for (int i = content.length() - 1; i >= 0; i--) if (content.charAt(i) == ' ') contentwc++;
-                this.add(doc, CollectionSchema.wordcount_i, contentwc);
-            }
+            this.add(doc, CollectionSchema.wordcount_i, net.yacy.document.CJKBigrams.wordCount(content));
         }
 
         // statistics about the links

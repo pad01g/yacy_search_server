@@ -1,3 +1,5 @@
+> **This is a fork** with search quality fixes (strict minimum match, term coverage weighting, CJK bigram indexing). See [FORK.md](FORK.md) and the experiment in [pad01g/yacy-lab](https://github.com/pad01g/yacy-lab).
+
 <div align="center">
 <h1 align="center">YaCy</h1>
 

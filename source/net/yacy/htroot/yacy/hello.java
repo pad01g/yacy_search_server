@@ -135,8 +135,10 @@ public final class hello {
             return prop;
         }
         // a request carried by the sidecar comes from the libp2p peer the sidecar authenticated: it must be the
-        // owner of this seed, and only relayed peers need that path
-        if (viaSidecar && (!sidecarPeer.equals(remoteSeed.libp2pPeerId()) || !remoteSeed.isRelayed())) {
+        // owner of this seed. Any peer may use that path: a peer behind a NAT reaches others through the relay, and a
+        // public peer reaches a peer behind a NAT through the tunnel to it. The address of the caller is still
+        // verified by the back-ping below (a peer behind a NAT can connect out).
+        if (viaSidecar && !sidecarPeer.equals(remoteSeed.libp2pPeerId())) {
             Network.log.info("hello/server: rejected seed " + remoteSeed.hash + " sent through the sidecar by libp2p peer " + sidecarPeer);
             prop.put("message", "your seed does not belong to your libp2p identity");
             return prop;

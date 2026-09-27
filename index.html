@@ -123,6 +123,7 @@ docker compose -f compose.demo.yaml -p yacydemo up -d
   <img src="assets/demo.png" alt="The demo page: the same query sent to the upstream network (left) and the fork (right). Upstream lists spam pages first; the fork lists verified relevant pages first and, in open mode, the spam below them labelled unverified." loading="lazy">
   <figcaption>"bitcoin lightning channel" in open mode. Left: upstream shows spam first. Right: the fork shows verified results first and the spam, labelled unverified, below.</figcaption>
 </figure>
+<p>The page also lets you change trust: choose which coordinators the searching peer trusts (a second coordinator lists only the spam peer, so trusting it makes the spam "verified"), edit and re-sign the trust list, hand the new version to one peer and watch it spread, and revoke or restore the operator's delegation.</p>
 <p>The experiments themselves: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code> (search quality) and <code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code> (trust and NAT). See the <a href="https://github.com/pad01g/yacy-lab#readme">lab README</a>.</p>
 
 <h2 id="limits">Limits</h2>

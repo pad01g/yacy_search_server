@@ -123,6 +123,7 @@ docker compose -f compose.demo.yaml -p yacydemo up -d
   <img src="../assets/demo.png" alt="デモの画面。同じクエリを本家の網（左）とフォーク（右）に投げたところ。本家はスパム頁を先に並べ、フォークは検証済みの正解頁を先に並べ、開放モードではスパムを未検証の印付きでその下に並べる。" loading="lazy">
   <figcaption>開放モードで「bitcoin lightning channel」。左の本家はスパムを先に出す。右のフォークは検証済みの結果を先に、スパムは未検証の印付きで下に出す。</figcaption>
 </figure>
+<p>画面では信頼の設定も変えられる。問い合わせ元が信頼するコーディネータを選ぶ（もう 1 つのコーディネータの一覧はスパムのピアだけで、それも信頼するとスパムが「検証済み」になる）。信頼の一覧を編集して署名し直す。新しい版を 1 つのピアにだけ渡して広がるのを見る。オペレータへの委任を失効させる、し直す。</p>
 <p>実験そのもの: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code>（検索品質）、<code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code>（信頼と NAT 越え）。詳しくは <a href="https://github.com/pad01g/yacy-lab#readme">yacy-lab の README</a>。</p>
 
 <h2 id="limits">限界</h2>

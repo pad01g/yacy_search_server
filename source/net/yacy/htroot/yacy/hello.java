@@ -45,6 +45,8 @@ import net.yacy.peers.Network;
 import net.yacy.peers.Protocol;
 import net.yacy.peers.Seed;
 import net.yacy.peers.graphics.ProfilingGraph;
+import net.yacy.peers.trust.PeerIdentity;
+import net.yacy.peers.trust.SeedSignature;
 import net.yacy.search.EventTracker;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
@@ -57,6 +59,9 @@ public final class hello {
     // example:
     // http://localhost:8090/yacy/hello.html?count=1&seed=p|{Hash=sCJ6Tq8T0N9x,Port=8090,PeerType=junior}
     // http://localhost:8090/yacy/hello.html?count=10&seed=z|H4sIAAAAAAAAADWQW2vDMAyF_81eJork3GyGX-YxGigly2WFvZTQijbQJsHx1pWx_z7nMj1J4ug7B_2s6-GsP5q3G-G6vBz2e0iz8t6zfuBr7-5PUNanQfulhqyzTkuUCFXvmitrBJtq4ed3tkPTtRpXhIiRDAmq0uhHFIiQMduJ-NXYU9NCbrrP1vnjIdUqgk09uIK51V6rMBRIilAo2NajwzfhGcx8QUKsEIp5iCJo-eaTVUXPfPQ4k5dm4pp8NzaESsLzS-14QVNIMlA-ka2m1JuZJJWIBRwPo0GIIiYp4zCSkC5GQSLiJIah0p6X_rvlS-MTbWdhkCSBIni9jA_rfP3-Ae1Oye9dAQAA
+    /** set by the libp2p sidecar on requests it carries from other peers */
+    public static final String SIDECAR_HEADER = "X-YaCy-Libp2p-Peer";
+
     public static serverObjects respond(final RequestHeader header, final serverObjects post, final serverSwitch env) {
         final Switchboard sb = (Switchboard) env;
         final serverObjects prop = new serverObjects();
@@ -73,9 +78,13 @@ public final class hello {
             prop.put("message", "cannot resolve your IP from your reported location " + clientip);
             return prop;
         }
-        prop.put("yourip", ias.getHostAddress());
+        // requests carried by the libp2p sidecar (NAT traversal) arrive from the loopback address;
+        // that address says nothing about the caller and must not be used as its IP
+        final boolean viaSidecar = header.get(SIDECAR_HEADER) != null && ias.isLoopbackAddress();
+        prop.put("yourip", viaSidecar ? "" : ias.getHostAddress());
         prop.put(Seed.YOURTYPE, Seed.PEERTYPE_VIRGIN); // a default value
         prop.put("seedlist", "");
+        prop.put("challengeSig", "");
         if ((post == null) || (env == null)) {
             prop.put("message", "no post or no enviroment");
             return prop;
@@ -90,6 +99,12 @@ public final class hello {
         final String key      = post.get("key", "");      // transmission key for response
         final String seed     = post.get("seed", "");
         int  count            = post.getInt("count", 0);
+        // prove to the caller that we own the key in our seed (see docs/trust-and-nat.md, hello challenge)
+        final String challenge = post.get("challenge", "");
+        final PeerIdentity identity = PeerIdentity.get();
+        if (!challenge.isEmpty() && challenge.length() <= 64 && identity != null) {
+            prop.put("challengeSig", SeedSignature.answerChallenge(identity, challenge));
+        }
         // final long  magic     = post.getLong("magic", 0);
         // final Date remoteTime = yacyCore.parseUniversalDate(post.get(MYTIME)); // read remote time
         if (seed.length() > Seed.maxsize) {
@@ -164,7 +179,7 @@ public final class hello {
         String backping_method = "none";
         boolean success = false;
         // TODO: make this a concurrent process
-        if (!serverCore.useStaticIP || !ias.isSiteLocalAddress()) {
+        if (!viaSidecar && (!serverCore.useStaticIP || !ias.isSiteLocalAddress())) {
             reportedips.add(ias.getHostAddress());
         }
         final int connectedBefore = sb.peers.sizeConnected();
@@ -225,8 +240,10 @@ public final class hello {
             sb.peers.peerActions.peerArrival(remoteSeed, true);
         } else {
             //ConcurrentLog.info("**hello-DEBUG**", "fail for IP(s) " + remoteSeed.getIPs() + ", port " + remoteSeed.getPort());
-            prop.put("yourip", ias.getHostAddress());
-            remoteSeed.setIP(ias.getHostAddress());
+            if (!viaSidecar) {
+                prop.put("yourip", ias.getHostAddress());
+                remoteSeed.setIP(ias.getHostAddress());
+            }
             prop.put(Seed.YOURTYPE, Seed.PEERTYPE_JUNIOR);
             remoteSeed.put(Seed.PEERTYPE, Seed.PEERTYPE_JUNIOR);
             Network.log.fine("hello/server: responded remote " + reportedPeerType + " peer '" + remoteSeed.getName() + "' from " + reportedips + ", time_dnsResolve=" + time_dnsResolve + ", time_backping=" + time_backping + ", method=" + backping_method + ", urls=" + callback[0]);

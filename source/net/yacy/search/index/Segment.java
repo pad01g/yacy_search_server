@@ -82,6 +82,7 @@ import net.yacy.kelondro.table.IndexTable;
 import net.yacy.kelondro.util.Bitfield;
 import net.yacy.kelondro.util.ISO639;
 import net.yacy.kelondro.util.MemoryControl;
+import net.yacy.peers.trust.Provenance;
 import net.yacy.repository.LoaderDispatcher;
 import net.yacy.search.query.SearchEvent;
 import net.yacy.search.schema.CollectionConfiguration;
@@ -640,6 +641,14 @@ public class Segment {
 
         // ENRICH DOCUMENT WITH RANKING INFORMATION
         this.fulltext.getDefaultConfiguration().postprocessing_references(this.getReferenceReportCache(), vector, url, null);
+
+        // SIGN AS AUTHOR: other peers accept the document only with the signature of a trusted author
+        // (see docs/trust-and-nat.md); the signature covers URL, title and the words of the RWI
+        if (condenser != null && collectionConfig.contains(CollectionSchema.provenance_s)) {
+            final Object title = vector.getFieldValue(CollectionSchema.title.getSolrFieldName());
+            final String provenance = Provenance.sign(urlNormalform, title == null ? "" : title.toString(), condenser.words().keySet());
+            if (provenance != null) vector.setField(CollectionSchema.provenance_s.getSolrFieldName(), provenance);
+        }
 
         // STORE TO SOLR
         this.putDocument(vector);

@@ -56,6 +56,9 @@ The table explains values that an agent or script must set deliberately. Paramet
 | Parameter | Meaning and valid values | Care |
 | --- | --- | --- |
 | `count` | SRU-style result count. It is an alternative to `maximumRecords` on search endpoints. | Controls the scope or format of the result. Prefer the narrowest value that answers the request. |
+| `challenge` | Random string (at most 64 characters) chosen by the caller. The response field `challengeSig` is this peer's Ed25519 signature of `yacy-hello-v1|<challenge>|<peer hash>`, verifiable with the `PK` of its seed. | Callers must reject the peer if the signature does not verify: somebody else answers at that address (see `docs/trust-and-nat.md`). |
+
+Seeds carry the owner's public key `PK` and signature `Sig` over the fields only the owner decides; the peer hash is derived from `PK`. With `trust.seed.acceptUnsigned=false` (default) seeds without signature are rejected. Requests that the libp2p sidecar carries from peers behind a NAT arrive from the loopback address with the header `X-YaCy-Libp2p-Peer`; for them the loopback address is never used as the caller's IP.
 
 Example request shape:
 

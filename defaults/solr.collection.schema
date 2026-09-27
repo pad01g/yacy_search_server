@@ -78,6 +78,9 @@ fresh_date_dt
 ## id of the referrer to this document, discovered during crawling
 referrer_id_s
 
+## signature of the peer that indexed the document: 1|author key|signature|word bloom filter (see docs/trust-and-nat.md)
+provenance_s
+
 ## the name of the publisher of the document
 publisher_t
 

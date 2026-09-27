@@ -47,6 +47,9 @@ import net.yacy.cora.util.LookAheadIterator;
 import net.yacy.kelondro.data.word.Word;
 import net.yacy.kelondro.util.kelondroException;
 import net.yacy.peers.operation.yacyVersion;
+import net.yacy.peers.trust.Provenance;
+import net.yacy.peers.trust.SeedSignature;
+import net.yacy.peers.trust.TrustPolicy;
 
 /**
  * This package is a collection of peer selection iterations that had been
@@ -96,6 +99,8 @@ public class DHTSelection {
                 if (omit != null && omit.contains(seed)) continue; // sort out peers that are target for DHT
                 if (seed.isLastSeenTimeout(3600000)) continue; // do not ask peers that had not been seen more than one hour (happens during a startup situation)
                 if (!seed.getFlagSolrAvailable()) continue; // extra peers always use solr direct, skip if solr interface is not available
+                // extra peers answer with their own index: ask trusted peers only, unless unverified results are wanted
+                if (!Provenance.isTrustedPeer(seed) && !TrustPolicy.acceptUnverifiedResults()) continue;
                 if (!seed.getFlagAcceptRemoteIndex() && seed.matchPeerTags(wordhashes)) seedSelection.dec(seed, r.nextInt(10) + 2); // robinson peers with matching peer tags
                 if (seed.getFlagRootNode()) seedSelection.dec(seed, r.nextInt(30) + 6); // root nodes (fast peers)
                 if (seed.getAge() < minage) seedSelection.dec(seed, r.nextInt(15) + 3); // young peers (with fresh info)
@@ -252,6 +257,18 @@ public class DHTSelection {
      * @param alsoMyOwn
      * @return
      */
+    /**
+     * DHT storage (index transfer targets and DHT search targets) does not need trusted peers, because searchers check
+     * the author signatures of the documents. It needs peers whose seed signature is acceptable and that store
+     * index for others: peers behind a relay only if they offer it (see docs/trust-and-nat.md, section 6).
+     */
+    static boolean isAcceptableStorage(final Seed s) {
+        final SeedSignature.Status sig = s.signatureStatus();
+        if (sig == SeedSignature.Status.INVALID) return false;
+        if (sig == SeedSignature.Status.UNSIGNED && !TrustPolicy.acceptUnsignedSeeds()) return false;
+        return s.isDHTStorageCandidate();
+    }
+
     public static Iterator<Seed> getAcceptRemoteIndexSeeds(final SeedDB seedDB, final byte[] starthash, final int max, final boolean alsoMyOwn) {
         return new acceptRemoteIndexSeedEnum(seedDB, starthash, Math.min(max, seedDB.sizeConnected()), alsoMyOwn);
     }
@@ -278,7 +295,7 @@ public class DHTSelection {
                 while (this.se.hasNext()) {
                     s = this.se.next();
                     if (s == null) return null;
-                    if (s.getFlagAcceptRemoteIndex() ||
+                    if ((s.getFlagAcceptRemoteIndex() && isAcceptableStorage(s)) ||
                         (this.alsoMyOwn && s.hash.equals(this.seedDB.mySeed().hash)) // Accept own peer regardless of FlagAcceptRemoteIndex
                        ) {
                         this.remaining--;

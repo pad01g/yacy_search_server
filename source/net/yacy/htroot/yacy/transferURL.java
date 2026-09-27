@@ -48,6 +48,8 @@ import net.yacy.kelondro.data.meta.URIMetadataNode;
 import net.yacy.peers.EventChannel;
 import net.yacy.peers.Network;
 import net.yacy.peers.Protocol;
+import net.yacy.peers.trust.Provenance;
+import net.yacy.peers.trust.TrustPolicy;
 import net.yacy.peers.Seed;
 import net.yacy.repository.Blacklist.BlacklistType;
 import net.yacy.search.Switchboard;
@@ -134,6 +136,17 @@ public final class transferURL {
                 // check if the entry is blacklisted
                 if ((blockBlacklist) && (Switchboard.urlBlacklist.isListed(BlacklistType.DHT, lEntry.url()))) {
                 	if (Network.log.isFine()) Network.log.fine("transferURL: blocked blacklisted URL '" + lEntry.url().toNormalform(false) + "' from peer " + otherPeerName);
+                    lEntry = null;
+                    blocked++;
+                    continue;
+                }
+
+                // the author signature must match; unsigned documents only in open mode (see docs/trust-and-nat.md).
+                // The storing peer does not need to trust the author: searchers check the author themselves.
+                final Provenance.Verdict verdict = lEntry.verifyProvenance();
+                if (verdict.status == Provenance.Status.INVALID
+                        || (verdict.status == Provenance.Status.UNSIGNED && !TrustPolicy.acceptUnverifiedResults())) {
+                    if (Network.log.isFine()) Network.log.fine("transferURL: blocked " + verdict.status + " URL '" + lEntry.url() + "' from peer " + otherPeerName);
                     lEntry = null;
                     blocked++;
                     continue;

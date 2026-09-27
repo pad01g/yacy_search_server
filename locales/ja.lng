@@ -4489,6 +4489,10 @@ Pictures==画像
 Cache==キャッシュ
 View via proxy==プロキシ経由で表示
 Not supported==サポートされていません
+"Not signed by an author in your trust list"=="信頼リストにある作者の署名がありません"
+Unverified==未検証
+"Declared by the author"=="作者による宣言"
+Author declares:==作者の宣言:
 #-----------------------------
 
 #File: yacysearchpagination.html

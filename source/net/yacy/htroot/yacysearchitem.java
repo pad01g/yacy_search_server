@@ -35,6 +35,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeSet;
@@ -63,6 +64,7 @@ import net.yacy.peers.NewsPool;
 import net.yacy.peers.Seed;
 import net.yacy.peers.graphics.ProfilingGraph;
 import net.yacy.search.EventTracker;
+import net.yacy.peers.trust.Provenance;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
 import net.yacy.search.navigator.Navigator;
@@ -269,6 +271,14 @@ public class yacysearchitem {
 
             prop.put("content_urlhash", urlhash);
             prop.put("content_ranking", Float.toString(result.score()));
+            // author signature and trust (see docs/trust-and-nat.md)
+            final Provenance.Verdict verdict = result.getTrustVerdict() == null ? result.verifyProvenance() : result.getTrustVerdict();
+            prop.put("content_verified", verdict.isTrusted() ? "true" : "false");
+            prop.put("content_trust", verdict.status.name().toLowerCase(Locale.ROOT));
+            prop.put("content_trustTags", String.join(" ", verdict.tags())); // tags are [a-z0-9._:-] only
+            prop.put("content_unverified", verdict.isTrusted() ? 0 : 1);
+            prop.put("content_trustTagsShown", verdict.tags().isEmpty() ? 0 : 1);
+            prop.put("content_trustTagsShown_tags", String.join(" ", verdict.tags()));
             final Date[] events = result.events();
             final boolean showEvent = events != null && events.length > 0 && sb.getConfig("search.navigation", "").indexOf("date",0) >= 0;
             prop.put("content_showEvent", showEvent ? 1 : 0);

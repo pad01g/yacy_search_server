@@ -69,6 +69,7 @@ import net.yacy.kelondro.util.kelondroException;
 import net.yacy.peers.Seed;
 import net.yacy.peers.SeedDB;
 import net.yacy.search.index.Segment;
+import net.yacy.peers.trust.Provenance;
 import net.yacy.search.query.QueryParams;
 import net.yacy.search.schema.CollectionConfiguration;
 import net.yacy.search.schema.CollectionSchema;
@@ -151,6 +152,9 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
         this.videoc = Integer.parseInt(prop.getProperty("lvideo", "0"));
         this.appc = Integer.parseInt(prop.getProperty("lapp", "0"));
         this.snippet = crypt.simpleDecode(prop.getProperty("snippet", ""));
+        // author signature (see docs/trust-and-nat.md)
+        final String prov = crypt.simpleDecode(prop.getProperty("prov", ""));
+        if (prov != null && !prov.isEmpty() && prov.length() <= Provenance.MAX_LENGTH) this.setField(CollectionSchema.provenance_s.name(), prov);
         // this.score = Float.parseFloat(prop.getProperty("score", "0.0")); // we don't use the remote rwi ranking but the local rwi ranking profile
         List<String> cs = new ArrayList<String>();
         cs.add(collection);
@@ -253,6 +257,28 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
         //CharacterRunAutomaton automaton = new CharacterRunAutomaton(matcher);
         //boolean match = automaton.run(this.url.toNormalform(true).toLowerCase(Locale.ROOT));
         //return match;
+    }
+
+    /** @return the author signature of the document (see Provenance), or null */
+    public String provenance() {
+        final Object v = this.getFieldValue(CollectionSchema.provenance_s.getSolrFieldName());
+        return v == null ? null : v.toString();
+    }
+
+    // trust verdict of this result, set during a search (see Provenance.verify); not stored
+    private Provenance.Verdict trustVerdict = null;
+
+    public Provenance.Verdict getTrustVerdict() {
+        return this.trustVerdict;
+    }
+
+    public void setTrustVerdict(final Provenance.Verdict verdict) {
+        this.trustVerdict = verdict;
+    }
+
+    /** verify the author signature against the current trust set */
+    public Provenance.Verdict verifyProvenance() {
+        return Provenance.verify(this.provenance(), this.url().toNormalform(true), this.dc_title(), Provenance.currentTrustSet());
     }
 
     public String dc_title() {
@@ -501,6 +527,11 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
     public int urllength() {
             return getInt(CollectionSchema.url_chars_i);
         }
+
+    /** replace the snippet delivered with a remote result; null removes it */
+    public void setSnippet(final String snippet) {
+        this.snippet = snippet;
+    }
 
     public String snippet() {
         return this.snippet;
@@ -801,6 +832,8 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
             s.append(",lvideo=").append(this.lvideo());
             s.append(",lapp=").append(this.lapp());
             s.append(",score=").append(Long.toString(this.score()));
+            final String prov = this.provenance();
+            if (prov != null && !prov.isEmpty()) s.append(",prov=").append(crypt.simpleEncode(prov));
             if (this.word() != null) {
                 // append also word properties
                 final String wprop = this.word().toPropertyForm();

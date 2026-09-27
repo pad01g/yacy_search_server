@@ -43,6 +43,7 @@ import net.yacy.cora.protocol.ClientIdentification;
 import net.yacy.cora.util.ConcurrentLog;
 import net.yacy.cora.util.LogRedaction;
 import net.yacy.kelondro.data.meta.URIMetadataNode;
+import net.yacy.peers.trust.TrustPolicy;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
 import net.yacy.search.query.QueryGoal;
@@ -239,12 +240,12 @@ public final class RAGAugmentor {
                 (int) sb.getConfigLong(
                         SwitchboardConstants.REMOTESEARCH_MAXCOUNT_USER,
                         sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXCOUNT_DEFAULT, 10)),
-                sb.getConfigLong(
+                TrustPolicy.clampRemoteSearchTime(sb.getConfigLong(
                         SwitchboardConstants.REMOTESEARCH_MAXTIME_USER,
-                        sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXTIME_DEFAULT, 3000)));
-        final long timeout = sb.getConfigLong(
+                        sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXTIME_DEFAULT, 5000))));
+        final long timeout = TrustPolicy.clampRemoteSearchTime(sb.getConfigLong(
                 SwitchboardConstants.REMOTESEARCH_MAXTIME_USER,
-                sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXTIME_DEFAULT, 3000));
+                sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXTIME_DEFAULT, 5000)));
         if (globalSearch) {
             theSearch.resortCachedResults();
         } else {

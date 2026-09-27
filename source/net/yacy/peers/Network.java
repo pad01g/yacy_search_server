@@ -61,6 +61,7 @@ import net.yacy.peers.operation.yacySeedUploadFile;
 import net.yacy.peers.operation.yacySeedUploadFtp;
 import net.yacy.peers.operation.yacySeedUploadScp;
 import net.yacy.peers.operation.yacySeedUploader;
+import net.yacy.peers.trust.TrustService;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
 import net.yacy.server.serverCore;
@@ -176,6 +177,8 @@ public class Network
 
         // before publishing, update some seed data
         this.sb.updateMySeed();
+        // trust lists, declared tags and NAT reachability (see docs/trust-and-nat.md)
+        TrustService.tick(this.sb);
 
         // publish own seed to other peer, this can every peer, but makes only sense for senior peers
         if ( this.sb.peers.sizeConnected() == 0 ) {

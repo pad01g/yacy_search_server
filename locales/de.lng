@@ -3460,6 +3460,10 @@ Citations==Zitationen
 Not supported==Nicht unterstützt
 Tags:==Tags:
 View via proxy==Über Proxy anzeigen
+"Not signed by an author in your trust list"=="Nicht von einem Autor aus Ihrer Vertrauensliste signiert"
+Unverified==Unbestätigt
+"Declared by the author"=="Vom Autor erklärt"
+Author declares:==Autor erklärt:
 #-----------------------------
 
 #File: yacysearchtrailer.html

@@ -12362,6 +12362,18 @@
     <trans-unit id="193a781" xml:space="preserve" approved="no" translate="yes">
        <source>Not supported</source>
     </trans-unit>
+    <trans-unit id="4ff81f14" xml:space="preserve" approved="no" translate="yes">
+       <source>"Not signed by an author in your trust list"</source>
+    </trans-unit>
+    <trans-unit id="5aea6081" xml:space="preserve" approved="no" translate="yes">
+       <source>Unverified</source>
+    </trans-unit>
+    <trans-unit id="aca14f23" xml:space="preserve" approved="no" translate="yes">
+       <source>"Declared by the author"</source>
+    </trans-unit>
+    <trans-unit id="db89f8dc" xml:space="preserve" approved="no" translate="yes">
+       <source>Author declares:</source>
+    </trans-unit>
   </body>
 </file>
 

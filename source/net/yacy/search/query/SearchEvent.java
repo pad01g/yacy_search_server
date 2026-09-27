@@ -99,6 +99,7 @@ import net.yacy.peers.graphics.ProfilingGraph;
 import net.yacy.repository.Blacklist.BlacklistType;
 import net.yacy.repository.LoaderDispatcher;
 import net.yacy.search.EventTracker;
+import net.yacy.peers.trust.Provenance;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
 import net.yacy.search.index.Segment;
@@ -2004,6 +2005,15 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
 
     private static final Pattern HTML_TAG = Pattern.compile("<[^>]*>");
 
+    /** unverified results are placed below every verified result, keeping their order among themselves */
+    static final long UNVERIFIED_OFFSET = 1L << 50;
+
+    /** weight a ranking by the priority of the author; move unverified results behind all verified ones */
+    static long trustRanking(final long ranking, final Provenance.Verdict verdict) {
+        if (verdict == null || !verdict.isTrusted()) return (ranking >> 12) - UNVERIFIED_OFFSET;
+        return (long) (ranking * verdict.weight());
+    }
+
     /**
      * @return the lower cased query terms as the user wrote them, or an empty list if coverage weighting does
      *         not apply (single term queries, or switched off by configuration)
@@ -2063,8 +2073,16 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
      */
     public void addResult(URIMetadataNode resultEntry, final long score) {
         if (resultEntry == null) return;
+        // results reach this point through several paths (local RWI, snippet loading creates new nodes):
+        // check the author signature here as well (see docs/trust-and-nat.md)
+        Provenance.Verdict verdict = resultEntry.getTrustVerdict();
+        if (verdict == null) {
+            verdict = resultEntry.verifyProvenance();
+            resultEntry.setTrustVerdict(verdict);
+        }
+        if (!Provenance.accept(verdict)) return;
         final long rankingBoost = isPreferredLocalRichCandidate(resultEntry) ? LOCAL_RICH_TEXT_RANKING_BOOST : 0L;
-        final long ranking = (this.disablePostRanking ? score : (score * 128) + postRanking(resultEntry, this.ref /*this.getTopicNavigator(MAX_TOPWORDS)*/)) + rankingBoost;
+        final long ranking = trustRanking((this.disablePostRanking ? score : (score * 128) + postRanking(resultEntry, this.ref /*this.getTopicNavigator(MAX_TOPWORDS)*/)) + rankingBoost, verdict);
         // TODO: above was originally using (see below), but getTopicNavigator returns this.ref and possibliy alters this.ref on first call (this.ref.size < 2 -> this.ref.clear)
         // TODO: verify and straighten the use of addTopic, getTopic and getTopicNavigator and related score calculation
         // final long ranking = ((long) (score * 128.f)) + postRanking(resultEntry, this.getTopicNavigator(MAX_TOPWORDS));

@@ -86,6 +86,7 @@ import net.yacy.peers.graphics.ProfilingGraph;
 import net.yacy.repository.Blacklist;
 import net.yacy.search.EventTracker;
 import net.yacy.search.SearchAccessRateConstants;
+import net.yacy.peers.trust.TrustPolicy;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
 import net.yacy.search.index.Segment;
@@ -894,9 +895,9 @@ public class yacysearch {
                     (int) sb.getConfigLong(
                         SwitchboardConstants.REMOTESEARCH_MAXCOUNT_USER,
                         sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXCOUNT_DEFAULT, 10)),
-                    sb.getConfigLong(
+                    TrustPolicy.clampRemoteSearchTime(sb.getConfigLong(
                         SwitchboardConstants.REMOTESEARCH_MAXTIME_USER,
-                        sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXTIME_DEFAULT, 3000)));
+                        sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXTIME_DEFAULT, 5000))));
 
             if(post.getBoolean("resortCachedResults") && cachedEvent == theSearch) {
                 theSearch.resortCachedResults();

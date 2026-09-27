@@ -206,6 +206,9 @@ import net.yacy.peers.NewsPool;
 import net.yacy.peers.Protocol;
 import net.yacy.peers.Seed;
 import net.yacy.peers.SeedDB;
+import net.yacy.peers.trust.PeerIdentity;
+import net.yacy.peers.trust.TrustPolicy;
+import net.yacy.peers.trust.TrustStore;
 import net.yacy.peers.graphics.NetworkGraph;
 import net.yacy.peers.graphics.WebStructureGraph;
 import net.yacy.peers.operation.yacyBuildProperties;
@@ -626,6 +629,20 @@ public final class Switchboard extends serverSwitch {
             } catch (final IOException e ) {
                 ConcurrentLog.logException(e);
             }
+        }
+
+        // load or create the peer key; the peer hash is derived from it (see docs/trust-and-nat.md)
+        try {
+            PeerIdentity.init(new File(this.dataPath, PeerIdentity.KEY_FILE));
+        } catch (final IOException e) {
+            this.log.severe("cannot load or create the peer key: " + e.getMessage(), e);
+            throw new RuntimeException(e);
+        }
+        TrustStore.init(new File(this.dataPath, TrustStore.BUNDLE_FILE),
+                () -> TrustStore.parseCoordinators(this.getConfig(TrustPolicy.COORDINATORS, "")),
+                () -> this.getConfig(SwitchboardConstants.NETWORK_NAME, ""));
+        if (TrustStore.parseCoordinators(this.getConfig(TrustPolicy.COORDINATORS, "")).isEmpty()) {
+            this.log.warn("no trust coordinator configured (" + TrustPolicy.COORDINATORS + "): every peer with a valid signature counts as trusted");
         }
 
         // initialize network database

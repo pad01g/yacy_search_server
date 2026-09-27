@@ -59,6 +59,7 @@ public enum CollectionSchema implements SchemaDeclaration {
     // optional but recommended, part of index distribution
     fresh_date_dt(SolrType.date, true, true, false, false, false, "date until resource shall be considered as fresh"),
     referrer_id_s(SolrType.string, true, true, false, false, false, "id of the referrer to this document, discovered during crawling"),// byte[] referrerHash();
+    provenance_s(SolrType.string, false, true, false, false, false, "signature of the peer that indexed the document: 1|author key|signature|word bloom filter (see docs/trust-and-nat.md)"),
     publisher_t(SolrType.text_general, true, true, false, false, true, "the name of the publisher of the document"),// String dc_publisher();
     language_s(SolrType.string, true, true, false, false, false, "the language used in the document"),// byte[] language();
     audiolinkscount_i(SolrType.num_integer, true, true, false, false, false, "number of links to audio resources"),// int laudio();

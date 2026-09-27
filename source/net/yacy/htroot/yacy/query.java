@@ -37,6 +37,8 @@ import net.yacy.cora.protocol.RequestHeader;
 import net.yacy.cora.util.ConcurrentLog;
 import net.yacy.peers.Network;
 import net.yacy.peers.Protocol;
+import net.yacy.peers.trust.PeerIdentity;
+import net.yacy.peers.trust.SeedSignature;
 import net.yacy.search.Switchboard;
 import net.yacy.server.serverObjects;
 import net.yacy.server.serverSwitch;
@@ -59,6 +61,7 @@ public final class query {
 
         final serverObjects prop = new serverObjects();
         prop.put("magic", Network.magic);
+        prop.put("challengeSig", "");
 
         if ((post == null) || (ss == null) || !Protocol.authentifyRequest(post, ss)) {
             prop.put("response", "-1"); // request rejected
@@ -106,6 +109,12 @@ public final class query {
         if (obj.equals("rwicount")) {
             // return the total number of available word indexes
             prop.put("response", sb.index.RWICount());
+            // prove that this address belongs to the key in our seed (hello back-ping, see docs/trust-and-nat.md)
+            final String challenge = post.get("challenge", "");
+            final PeerIdentity identity = PeerIdentity.get();
+            if (!challenge.isEmpty() && challenge.length() <= 64 && identity != null) {
+                prop.put("challengeSig", SeedSignature.answerChallenge(identity, challenge));
+            }
             return prop;
         }
 

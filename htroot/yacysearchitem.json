@@ -15,7 +15,10 @@
       "path": "#[path]#",
       "file": "#[file]#",
       "urlhash": "#[urlhash]#",
-      "ranking": "#[ranking]#"
+      "ranking": "#[ranking]#",
+      "verified": "#[verified]#",
+      "trust": "#[trust]#",
+      "trustTags": "#[trustTags]#"
     }::#(item)#::#(nl)#::    ,#(/nl)#
     {
       "title": "#[name]#",

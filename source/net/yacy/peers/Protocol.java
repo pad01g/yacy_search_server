@@ -48,6 +48,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
+import java.security.SecureRandom;
 import java.net.MalformedURLException;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -116,6 +117,11 @@ import net.yacy.kelondro.rwi.ReferenceContainerCache;
 import net.yacy.kelondro.util.FileUtils;
 import net.yacy.kelondro.util.MemoryControl;
 import net.yacy.peers.graphics.ProfilingGraph;
+import net.yacy.peers.trust.Ed25519;
+import net.yacy.peers.trust.P2PRoute;
+import net.yacy.peers.trust.Provenance;
+import net.yacy.peers.trust.SeedSignature;
+import net.yacy.peers.trust.TrustPolicy;
 import net.yacy.peers.graphics.WebStructureGraph;
 import net.yacy.peers.graphics.WebStructureGraph.HostReference;
 import net.yacy.peers.operation.yacyVersion;
@@ -196,11 +202,13 @@ public final class Protocol {
 
         Map<String, String> result = null;
         final String salt = crypt.randomSalt();
+        final String challenge = newChallenge();
         long responseTime = Long.MAX_VALUE;
         byte[] content = null;
         try (final HTTPClient httpClient = new HTTPClient(ClientIdentification.yacyInternetCrawlerAgent, 30000)) {
             // generate request
             final Map<String, ContentBody> parts = basicRequestParts(Switchboard.getSwitchboard(), null, salt);
+            parts.put("challenge", UTF8.StringBody(challenge));
             parts.put("count", UTF8.StringBody("20"));
             parts.put("magic", UTF8.StringBody(Long.toString(Network.magic)));
             parts.put("seed", UTF8.StringBody(mySeed.genSeedStr(salt)));
@@ -239,13 +247,13 @@ public final class Protocol {
             } else {
                 try {
                     // patch the remote peer address to avoid that remote peers spoof the network with wrong addresses
-                    String host = Domains.stripToHostName(targetBaseURL.getHost());
-                    InetAddress ie = Domains.dnsResolve(host);
-                    otherPeer = Seed.genRemoteSeed(seed, false, ie.getHostAddress());
+                    // (not for peers reached through a local sidecar tunnel: the tunnel address is not theirs)
+                    otherPeer = Seed.genRemoteSeed(seed, false, P2PRoute.isRouted(targetBaseURL) ? null : resolvedHost(targetBaseURL));
                     if ( !otherPeer.hash.equals(targetHash) ) {
                         Network.log.info("yacyClient.hello: consistency error: otherPeer.hash = " + otherPeer.hash + ", otherHash = " + targetHash);
                         return null; // no success
                     }
+                    if (!answeredChallenge(otherPeer, challenge, result)) return null;
                 } catch (final IOException e ) {
                     Network.log.info("yacyClient.hello: consistency error: other seed bad:" + e.getMessage() + ", seed=" + seed);
                     return null; // no success
@@ -263,6 +271,8 @@ public final class Protocol {
         // we overwrite our own IP number only
         if ( serverCore.useStaticIP ) {
             mySeed.setIPs(Switchboard.getSwitchboard().myPublicIPs());
+        } else if (P2PRoute.isRouted(targetBaseURL)) {
+            // through the sidecar tunnel the other peer sees the loopback address, not ours: keep our IP
         } else {
             final String myIP = result.get("yourip");
             if (myIP == null) {
@@ -348,11 +358,12 @@ public final class Protocol {
             } else {
                 try {
                     if ( i == 1 ) {
-                        String host = Domains.stripToHostName(targetBaseURL.getHost());
-                        InetAddress ia = Domains.dnsResolve(host);
-                        if (ia == null) continue;
-                        host = ia.getHostAddress(); // the actual address of the target as we had been successful when contacting them is patched here
+                        // the actual address of the target as we had been successful when contacting them is patched here
+                        final boolean routed = P2PRoute.isRouted(targetBaseURL);
+                        final String host = routed ? null : resolvedHost(targetBaseURL);
+                        if (host == null && !routed) continue;
                         s = Seed.genRemoteSeed(seedStr, false, host);
+                        if (!answeredChallenge(s, challenge, result)) return null;
                     } else {
                         s = Seed.genRemoteSeed(seedStr, false, null);
                     }
@@ -370,6 +381,31 @@ public final class Protocol {
         return result;
     }
 
+    private static final SecureRandom challengeRandom = new SecureRandom();
+
+    private static String newChallenge() {
+        final byte[] b = new byte[16];
+        challengeRandom.nextBytes(b);
+        return Ed25519.encode(b);
+    }
+
+    private static String resolvedHost(final MultiProtocolURL url) {
+        final InetAddress ia = Domains.dnsResolve(Domains.stripToHostName(url.getHost()));
+        return ia == null ? null : ia.getHostAddress();
+    }
+
+    /**
+     * A signed seed must prove, with the answer to our challenge, that the peer we reached owns its key.
+     * Unsigned seeds (only accepted with trust.seed.acceptUnsigned=true) cannot prove anything and pass.
+     */
+    private static boolean answeredChallenge(final Seed peer, final String challenge, final Map<String, String> result) {
+        if (peer == null) return false;
+        if (peer.signatureStatus() == SeedSignature.Status.UNSIGNED) return TrustPolicy.acceptUnsignedSeeds();
+        if (SeedSignature.checkChallenge(peer, challenge, result.get("challengeSig"))) return true;
+        Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " did not prove the ownership of its key");
+        return false;
+    }
+
     public static long[] queryRWICount(final MultiProtocolURL targetBaseURL, final Seed target, int timeout) {
         // prepare request
         final String salt = crypt.randomSalt();
@@ -377,8 +413,10 @@ public final class Protocol {
         // send request
         try {
             final Map<String, ContentBody> parts = basicRequestParts(Switchboard.getSwitchboard(), target.hash, salt);
+            final String challenge = newChallenge();
             parts.put("object", UTF8.StringBody("rwicount"));
             parts.put("env", UTF8.StringBody(""));
+            parts.put("challenge", UTF8.StringBody(challenge));
             //ConcurrentLog.info("**hello-DEBUG**queryRWICount**", "posting request to " + targetBaseURL);
             final Post post = new Post(targetBaseURL, target.hash, "/yacy/query.html", parts, timeout);
 
@@ -389,6 +427,8 @@ public final class Protocol {
             final String resp = result.get("response");
             //ConcurrentLog.info("**hello-DEBUG**queryRWICount**", "received RESPONSE from requesting " + targetBaseURL + " : response = " + resp);
             if (resp == null) return new long[] {-1, -1};
+            // the back-ping of hello: only an address where the owner of the seed's key answers counts
+            if (!answeredChallenge(target, challenge, result)) return new long[] {-1, -1};
             String magic = result.get("magic");
             if (magic == null) magic = "0";
             try {
@@ -747,6 +787,20 @@ public final class Protocol {
                 Network.log.info("remote search: url-hash " + ASCII.String(urlEntry.hash()) + " does not belong to word-attached-hash " + ASCII.String(entry.urlhash()) + "; url = " + urlEntry.url().toNormalform(true) + " from peer " + target.getName());
                 continue; // spammed
             }
+
+            // the author signature decides whether the result is used (see docs/trust-and-nat.md)
+            final Provenance.Verdict verdict = urlEntry.verifyProvenance();
+            if (!Provenance.accept(verdict)) {
+                if (Network.log.isInfo()) Network.log.info("remote search: rejected " + verdict.status + " url " + urlEntry.url().toNormalform(true) + " from peer " + target.getName());
+                continue;
+            }
+            // a peer that stores a signed document must not attach it to words the author did not index
+            if (!verdict.containsAll(Provenance.splitHashes(wordhashes))) {
+                Network.log.info("remote search: url " + urlEntry.url().toNormalform(true) + " from peer " + target.getName() + " does not contain the query words according to its author");
+                continue;
+            }
+            urlEntry.setTrustVerdict(verdict);
+            if (!Provenance.keepSnippet(verdict, target)) urlEntry.setSnippet(null);
 
             // passed all checks, store url
             storeDocs.add(urlEntry);
@@ -1413,6 +1467,16 @@ public final class Protocol {
                 }
                 continue; // reject url outside of our domain
             }
+
+            // the author signature decides whether the result is used (see docs/trust-and-nat.md)
+            final Provenance.Verdict verdict = urlEntry.verifyProvenance();
+            if (!Provenance.accept(verdict)) {
+                if (Network.log.isInfo()) Network.log.info((localsearch ? "local" : "remote") + " search (solr): rejected " + verdict.status + " url " + urlEntry.url().toNormalform(true)
+                        + (target == null ? "" : " from peer " + target.getName()));
+                continue;
+            }
+            urlEntry.setTrustVerdict(verdict);
+            if (!localsearch && snippets != null && !Provenance.keepSnippet(verdict, target)) snippets.remove(ASCII.String(urlEntry.hash()));
 
             // passed all checks, store url
             if (!localsearch) {

@@ -71,6 +71,7 @@ import net.yacy.peers.Seed;
 import net.yacy.peers.SeedDB;
 import net.yacy.peers.graphics.ProfilingGraph;
 import net.yacy.search.EventTracker;
+import net.yacy.peers.trust.TrustPolicy;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
 import net.yacy.search.index.Segment;
@@ -118,7 +119,7 @@ public final class search {
         final String  urls   = post.get("urls", "");         // a string of url hashes that are preselected for the search: no other may be returned
         final String  abstracts = post.get("abstracts", "");  // a string of word hashes for abstracts that shall be generated, or 'auto' (for maxcount-word), or '' (for none)
         final int     count  = Math.min((int) sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXCOUNT_DEFAULT, 10), post.getInt("count", 10)); // maximum number of wanted results
-        final long    maxtime = Math.min((int) sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXTIME_DEFAULT, 3000), post.getLong("time", 3000)); // maximum waiting time
+        final long    maxtime = TrustPolicy.clampRemoteSearchTime(Math.min(sb.getConfigLong(SwitchboardConstants.REMOTESEARCH_MAXTIME_DEFAULT, 5000), post.getLong("time", 5000))); // maximum waiting time
         final int     maxdist= post.getInt("maxdist", Integer.MAX_VALUE);
         final String  prefer = post.get("prefer", "");
         final String  contentdom = post.get("contentdom", "all");

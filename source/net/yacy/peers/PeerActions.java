@@ -30,6 +30,8 @@ import net.yacy.cora.document.encoding.ASCII;
 import net.yacy.cora.document.feed.RSSMessage;
 import net.yacy.cora.storage.ConcurrentARC;
 import net.yacy.kelondro.util.MapTools;
+import net.yacy.peers.trust.SeedSignature;
+import net.yacy.peers.trust.TrustPolicy;
 
 
 public class PeerActions {
@@ -60,6 +62,12 @@ public class PeerActions {
         final String error = seed.isProper(false);
         if (error != null) {
             Network.log.severe("connect: WRONG seed (" + seed.getName() + "/" + seed.hash + "): " + error);
+            return false;
+        }
+        final SeedSignature.Status signature = seed.signatureStatus();
+        if (signature == SeedSignature.Status.INVALID
+                || (signature == SeedSignature.Status.UNSIGNED && !TrustPolicy.acceptUnsignedSeeds())) {
+            Network.log.info("connect: rejecting " + signature + " seed " + seed.getName() + "/" + seed.hash);
             return false;
         }
         if ((this.seedDB.mySeedIsDefined()) && (seed.hash.equals(this.seedDB.mySeed().hash))) {

@@ -86,6 +86,11 @@ import net.yacy.kelondro.data.word.Word;
 import net.yacy.kelondro.util.MapTools;
 import net.yacy.kelondro.util.OS;
 import net.yacy.peers.operation.yacyVersion;
+import net.yacy.peers.trust.Ed25519;
+import net.yacy.peers.trust.P2PRoute;
+import net.yacy.peers.trust.PeerIdentity;
+import net.yacy.peers.trust.SeedSignature;
+import net.yacy.peers.trust.TrustPolicy;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
 import net.yacy.utils.Bitfield;
@@ -157,7 +162,7 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
     public static final String HASH = "Hash";
     
     /** Birthday - first startup */
-    private static final String BDATE = "BDate";
+    public static final String BDATE = "BDate";
     
     /** UTC-Offset */
     public static final String UTC = "UTC";
@@ -207,6 +212,26 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
     public static final String NEWS = "news"; // news attachment
     public static final String DCT = "dct"; // disconnect time
     public static final String SOLRAVAILABLE ="SorlAvail"; // field to remember if remotePeer solr interface is avail.
+    // identity and trust, see docs/trust-and-nat.md
+    /** Ed25519 public key of the peer (raw 32 bytes, base64url); the peer hash is derived from it */
+    public static final String PK = "PK";
+    /** signature of the owner over the signed part of the seed (see SeedSignature) */
+    public static final String SIG = "Sig";
+    /** time of the signature (ms since epoch) */
+    public static final String SIGT = "SigT";
+    /** self declared tags ('|' separated), e.g. ads */
+    public static final String TAGS = "Tags";
+    /** how the peer can be reached: direct, relay (through the libp2p sidecar and a relay) or none (leecher) */
+    public static final String REACH = "Reach";
+    public static final String REACH_DIRECT = "direct";
+    public static final String REACH_RELAY = "relay";
+    public static final String REACH_NONE = "none";
+    /** libp2p addresses of the peer ('|' separated), for relayed peers the circuit addresses */
+    public static final String P2PA = "P2PA";
+    /** "1" if a relayed peer offers to store DHT index for others */
+    public static final String RDS = "RDS";
+    /** highest trust list versions this peer holds, per coordinator (see TrustStore) */
+    public static final String TV = "TV";
     
     /** zero-value */
     private static final String ZERO = "0";
@@ -689,6 +714,50 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         return this.dna;
     }
 
+    // cache of the last signature check: the signed part and its result
+    private volatile String sigCheckedFor = null;
+    private volatile SeedSignature.Status sigStatus = null;
+
+    /** @return whether the owner signed this seed; the result is cached until the signed fields change */
+    public final SeedSignature.Status signatureStatus() {
+        final String key = SeedSignature.cacheKey(this);
+        final SeedSignature.Status cached = this.sigStatus;
+        if (cached != null && key.equals(this.sigCheckedFor)) return cached;
+        final SeedSignature.Status status = SeedSignature.verify(this);
+        this.sigStatus = status;
+        this.sigCheckedFor = key;
+        return status;
+    }
+
+    public final boolean isSigned() {
+        return signatureStatus() == SeedSignature.Status.VALID;
+    }
+
+    /** @return direct, relay or none; seeds without the field are direct peers */
+    public final String getReach() {
+        return get(REACH, REACH_DIRECT);
+    }
+
+    /** @return true if the peer can only be reached through a libp2p relay */
+    public final boolean isRelayed() {
+        return REACH_RELAY.equals(getReach());
+    }
+
+    /** @return true if the peer may be a DHT storage target: direct peers, and relayed peers that offer it */
+    public final boolean isDHTStorageCandidate() {
+        final String reach = getReach();
+        if (REACH_NONE.equals(reach)) return false;
+        if (REACH_RELAY.equals(reach)) return "1".equals(get(RDS, "0"));
+        return true;
+    }
+
+    /** @return the libp2p peer id of the seed's key, or null for an unsigned seed */
+    public final String libp2pPeerId() {
+        final byte[] pk = Ed25519.decode(get(PK, null));
+        if (pk == null || pk.length != Ed25519.PUBLIC_KEY_LENGTH) return null;
+        return PeerIdentity.libp2pPeerIdOf(pk);
+    }
+
     public final void setName(final String name) {
         synchronized ( this.dna ) {
             this.dna.put(Seed.NAME, checkPeerName(name));
@@ -811,6 +880,8 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
      * @return an address string which can be used as host:port part of an url
      */
     public final String getPublicAddress(final InetAddress ip) {
+        final String routed = routedAddress();
+        if (routed != null) return routed;
         // we do not use getPublicAddress(String ip) here to be able to check IPv6 with instanceof Inet6Address which is faster than indexOf(':')
         if (ip == null) throw new RuntimeException("ip == NULL"); // that should not happen
         final String port = this.dna.get(Seed.PORT); // we do not use getPort() here to avoid String->Integer->toString() conversion
@@ -837,6 +908,8 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
      * @ŧhrows RuntimeException when the ip parameter is null
      */
     public final String getPublicAddress(final String ip) {
+        final String routed = routedAddress();
+        if (routed != null) return routed;
         if (ip == null) throw new RuntimeException("ip == NULL"); // that should not happen in Peer-to-Peer mode (but can in Intranet mode)
         final String port = this.dna.get(Seed.PORT); // we do not use getPort() here to avoid String->Integer->toString() conversion
         final StringBuilder sb = new StringBuilder(ip.length() + 8); // / = surplus for port
@@ -857,6 +930,12 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         return sb.toString();
     }
     
+    /** @return host:port of the local sidecar tunnel to this peer, or null if it is reached directly */
+    private String routedAddress() {
+        final String routed = P2PRoute.baseURL(this);
+        return routed == null ? null : routed.substring(routed.indexOf("://") + 3);
+    }
+
     /**
      * Generate a public URL using a given ip. This combines the ip with the http(s) port and encloses the ip
      * with square brackets if the ip is of typeIPv6
@@ -866,6 +945,9 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
      * @throws RuntimeException when the ip parameter is null
      */
     public final String getPublicURL(final String ip, final boolean preferHTTPS) throws RuntimeException {
+        // peers behind a NAT are reached through the local libp2p sidecar and a relay
+        final String routed = P2PRoute.baseURL(this);
+        if (routed != null) return routed;
         if (ip == null) {
         	throw new RuntimeException("ip == NULL"); // that should not happen in Peer-to-Peer mode (but can in Intranet mode)
         }
@@ -1288,7 +1370,9 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         // generate a seed for the local peer (as anonymous peer)
         // this is the birthplace of a seed, that then will start to travel to other peers
 
-        final String hashs = ASCII.String(bestGap(db));
+        // the hash is derived from the peer key; without a key (tools, tests) choose a gap in the DHT as before
+        final PeerIdentity identity = PeerIdentity.get();
+        final String hashs = identity == null ? ASCII.String(bestGap(db)) : identity.peerHash();
         Network.log.info("init: OWN SEED = " + hashs);
 
         final Seed newSeed = new Seed(hashs);
@@ -1297,6 +1381,7 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         final int port = Switchboard.getSwitchboard().getPublicPort(SwitchboardConstants.SERVER_PORT, 8090); //get port from config
         newSeed.dna.put(Seed.NAME, defaultPeerName() );
         newSeed.dna.put(Seed.PORT, Integer.toString(port));
+        if (identity != null) newSeed.dna.put(Seed.PK, identity.publicKeyB64());
         return newSeed;
     }
 
@@ -1342,6 +1427,17 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
             throw new IOException("hash == null");
         }
         final Seed resultSeed = new Seed(hash, dna);
+
+        // check the owner's signature; our own seed file is trusted as it is
+        if (!ownSeed) {
+            final SeedSignature.Status sig = resultSeed.signatureStatus();
+            if (sig == SeedSignature.Status.INVALID) {
+                throw new IOException("seed signature invalid for " + hash);
+            }
+            if (sig == SeedSignature.Status.UNSIGNED && !TrustPolicy.acceptUnsignedSeeds()) {
+                throw new IOException("unsigned seed rejected (trust.seed.acceptUnsigned=false) for " + hash);
+            }
+        }
 
         // check semantics of content
         String testResult = resultSeed.isProper(ownSeed);
@@ -1470,6 +1566,9 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
     }
 
     public final String genSeedStr(final String key) {
+        // the own seed is signed each time its signed part changed
+        final PeerIdentity identity = PeerIdentity.get();
+        if (identity != null && identity.peerHash().equals(this.hash)) SeedSignature.sign(this, identity);
         // use a default encoding
         final String r = toString();
         final String z = crypt.simpleEncode(r, key, 'z');

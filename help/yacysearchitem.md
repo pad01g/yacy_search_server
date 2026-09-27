@@ -60,6 +60,18 @@ Example request shape:
 GET or POST /yacysearchitem.html?auth=...&eventID=...&item=...
 ```
 
+### Trust Fields
+
+Every result carries the verdict on its author signature (see `docs/trust-and-nat.md`):
+
+| Field (JSON) | Meaning |
+| --- | --- |
+| `verified` | `true` if the document is signed by this peer or by an author in the trust set |
+| `trust` | `self`, `trusted`, `signed` (valid signature, author not trusted), `unsigned` |
+| `trustTags` | tags the author declared in the trust list, e.g. `ads`, separated by spaces |
+
+Unverified results are only delivered with `trust.search.acceptUnverified=true` and always rank below verified ones. Results are delivered in the order they arrived; request the search again with `resortCachedResults=true` to get the final order. The HTML result shows an "Unverified" label and the declared tags.
+
 ## What To Expect
 
 Expect rendered search or content output: result lists, snippets, previews, redirects, widgets, or fragments. If output is empty, check whether the index contains matching documents before changing query syntax.

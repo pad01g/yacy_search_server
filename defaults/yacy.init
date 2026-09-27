@@ -1033,9 +1033,32 @@ search.jsresort = true
 
 # remote search details
 remotesearch.maxcount = 10
-remotesearch.maxtime = 3000
+# time in milliseconds to wait for the answers of other peers; values above 10000 are capped at 10000.
+# The search page shows results as they arrive, so a longer time mostly helps slow (e.g. relayed) peers.
+remotesearch.maxtime = 5000
 # minimum age in days of peers that are asked in a remote DHT (RWI) search
 remotesearch.dht.minage = 3
+
+# peer identity, trust lists and NAT traversal, see docs/trust-and-nat.md
+# accept seeds of peers without owner signature (unmodified YaCy peers); needed to use the index of the old network
+trust.seed.acceptUnsigned = false
+# Ed25519 public keys (base64url) of the trust coordinators, separated by ',', first = highest priority.
+# Empty: every peer with a valid signature counts as trusted.
+trust.coordinators =
+# URLs to fetch signed trust bundles from (in addition to the exchange between peers), separated by ','
+trust.bundle.urls =
+# also show results whose author is not trusted or not signed, marked as unverified and below all verified results
+trust.search.acceptUnverified = false
+# drop results of authors with one of these declared tags, e.g. ads,adult
+trust.policy.excludeTags =
+# tags this peer declares about itself, e.g. ads or proxy:google
+trust.selfTags =
+# local HTTP address of the libp2p sidecar (empty: no NAT traversal), e.g. http://127.0.0.1:8095
+p2p.sidecar.url =
+# auto: use a relay when the sidecar reports that the peer is not reachable; direct: never; leecher: do not accept connections
+p2p.mode = auto
+# a peer behind a relay also stores DHT index for others
+p2p.relay.dhtStorage = false
 remotesearch.result.store=true
 # Maximum size allowed (in bytes) for a remote document result to be stored to local index. Defaults to -1, which means no limit.
 remotesearch.result.store.maxsize=-1

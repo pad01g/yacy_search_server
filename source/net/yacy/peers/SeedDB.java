@@ -60,6 +60,7 @@ import net.yacy.kelondro.data.word.Word;
 import net.yacy.kelondro.util.FileUtils;
 import net.yacy.kelondro.util.kelondroException;
 import net.yacy.peers.operation.yacySeedUploader;
+import net.yacy.peers.trust.PeerIdentity;
 import net.yacy.search.Switchboard;
 import net.yacy.server.serverCore;
 import net.yacy.server.serverSwitch;
@@ -189,6 +190,12 @@ public final class SeedDB implements AlternativeDomainNames {
             // load existing identity
             this.mySeed = Seed.load(this.myOwnSeedFile);
             if (this.mySeed == null) throw new IOException("current seed is null");
+            // the peer hash is derived from the peer key; a seed of an older version (random hash) is replaced
+            final PeerIdentity identity = PeerIdentity.get();
+            if (identity != null && !identity.peerHash().equals(this.mySeed.hash)) {
+                final String name = this.mySeed.getName();
+                throw new IOException("stored seed " + this.mySeed.hash + " (" + name + ") does not belong to the peer key " + identity.peerHash());
+            }
         } catch (final IOException e) {
             // create new identity
             ConcurrentLog.severe("SEEDDB", "could not load stored mySeed.txt from " + this.myOwnSeedFile.toString() + ": " + e.getMessage() + ". creating new seed.", e);
@@ -214,6 +221,8 @@ public final class SeedDB implements AlternativeDomainNames {
         }
         this.mySeed.setIPs(Switchboard.getSwitchboard().myPublicIPs());
         this.mySeed.put(Seed.PEERTYPE, Seed.PEERTYPE_VIRGIN); // markup startup condition
+        final PeerIdentity identity = PeerIdentity.get();
+        if (identity != null) this.mySeed.put(Seed.PK, identity.publicKeyB64());
     }
 
     public int redundancy() {

@@ -40,6 +40,7 @@ import net.yacy.cora.federate.solr.connector.AbstractSolrConnector;
 import net.yacy.cora.order.NaturalOrder;
 import net.yacy.cora.protocol.Domains;
 import net.yacy.cora.storage.HandleSet;
+import net.yacy.document.CJKBigrams;
 import net.yacy.document.parser.html.AbstractScraper;
 import net.yacy.document.parser.html.CharacterCoding;
 import net.yacy.kelondro.data.word.Word;
@@ -127,11 +128,25 @@ public class QueryGoal {
         for (String s: this.include_strings) parseQuery(s, this.include_words, this.include_words);
         for (String s: this.exclude_strings) parseQuery(s, this.exclude_words, this.exclude_words);
 
+        // the word index stores CJK text as bigrams (see WordTokenizer), so the words must be split the same way.
+        // The include/exclude strings stay unsplit: they are sent to Solr as phrases.
+        splitCJKWords(this.include_words);
+        splitCJKWords(this.exclude_words);
+
         WordCache.learn(this.include_words);
         WordCache.learn(this.exclude_words);
 
         this.include_hashes = null;
         this.exclude_hashes = null;
+    }
+
+    private static void splitCJKWords(final NormalizedWords words) {
+        final List<String> cjk = new ArrayList<>();
+        for (final String word: words) if (CJKBigrams.containsCJK(word)) cjk.add(word);
+        for (final String word: cjk) {
+            words.remove(word);
+            words.addAll(CJKBigrams.split(word));
+        }
     }
 
 /*
@@ -259,6 +274,22 @@ public class QueryGoal {
     public int getIncludeSize() {
         assert this.include_hashes == null || this.include_words.size() == 0 || this.include_hashes.size() == this.include_words.size();
         return this.include_hashes == null ? this.include_words.size() : this.include_hashes.size();
+    }
+
+    /**
+     * @return the number of search terms as the user wrote them (quoted strings count as one term).
+     * Unlike {@link #getIncludeSize()} this does not count the bigrams of CJK words.
+     */
+    public int getIncludeStringsSize() {
+        return this.include_strings.size();
+    }
+
+    /**
+     * @return true if one of the include strings contains Chinese, Japanese or Korean characters
+     */
+    public boolean containsCJK() {
+        for (final String s: this.include_strings) if (CJKBigrams.containsCJK(s)) return true;
+        return false;
     }
 
     public int getExcludeSize() {

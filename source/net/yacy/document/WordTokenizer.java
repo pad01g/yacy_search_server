@@ -217,6 +217,9 @@ public class WordTokenizer implements Enumeration<StringBuilder> {
                     this.s.add(sb);
                     sb = null;
                 }
+
+                // CJK text has no spaces: split CJK runs into overlapping bigrams (see CJKBigrams)
+                if (CJKBigrams.containsCJK(r)) expandCJK(this.s);
             }
             r = this.s.get(this.sIndex++);
             return r;
@@ -241,6 +244,19 @@ public class WordTokenizer implements Enumeration<StringBuilder> {
             this.sr.close();
             this.sr = null;
         }
+    }
+
+    private static void expandCJK(final List<StringBuilder> tokens) {
+        final List<StringBuilder> expanded = new ArrayList<StringBuilder>(tokens.size() * 2);
+        for (final StringBuilder token: tokens) {
+            if (!CJKBigrams.containsCJK(token)) {
+                expanded.add(token);
+                continue;
+            }
+            for (final String part: CJKBigrams.split(token.toString())) expanded.add(new StringBuilder(part));
+        }
+        tokens.clear();
+        tokens.addAll(expanded);
     }
 
     public static StringBuilder trim(final StringBuilder sb) {

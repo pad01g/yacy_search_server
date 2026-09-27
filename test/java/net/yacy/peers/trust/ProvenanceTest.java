@@ -150,6 +150,86 @@ public class ProvenanceTest {
         assertFalse(P2PRoute.isSidecarClient("127.0.0.1", "12D3KooWPeerA"));
     }
 
+    private static net.yacy.kelondro.data.meta.URIMetadataNode node(final String url, final String title, final String prov, final String collection) throws Exception {
+        final net.yacy.cora.document.id.DigestURL u = new net.yacy.cora.document.id.DigestURL(url);
+        final org.apache.solr.common.SolrDocument d = new org.apache.solr.common.SolrDocument();
+        d.addField(net.yacy.search.schema.CollectionSchema.id.name(), net.yacy.cora.document.encoding.ASCII.String(u.hash()));
+        d.addField(net.yacy.search.schema.CollectionSchema.sku.name(), u.toNormalform(false));
+        d.addField(net.yacy.search.schema.CollectionSchema.title.name(), title);
+        d.addField(net.yacy.search.schema.CollectionSchema.text_t.name(), "some text");
+        d.addField(net.yacy.search.schema.CollectionSchema.description_txt.name(), "a description");
+        d.addField(net.yacy.search.schema.CollectionSchema.author.name(), "an author");
+        if (prov != null) d.addField(net.yacy.search.schema.CollectionSchema.provenance_s.name(), prov);
+        if (collection != null) d.addField(net.yacy.search.schema.CollectionSchema.collection_sxt.name(), collection);
+        return new net.yacy.kelondro.data.meta.URIMetadataNode(d);
+    }
+
+    @Test
+    public void testLocalUnsignedDocuments() throws Exception {
+        // crawled before documents were signed, or imported: belongs to this peer
+        assertEquals(Provenance.Status.SELF, node(URL, "t", null, "user").verifyProvenanceLocal().status);
+        // transferred by another peer without signature: not ours
+        assertEquals(Provenance.Status.UNSIGNED, node(URL, "t", null, "dht").verifyProvenanceLocal().status);
+        // signed documents are judged by their signature
+        assertEquals(Provenance.Status.SELF, node(URL, "Autovacuum tuning", signed(), "dht").verifyProvenanceLocal().status);
+    }
+
+    @Test
+    public void testStripKeepsOnlySignedAndTechnicalFields() throws Exception {
+        final net.yacy.kelondro.data.meta.URIMetadataNode n = node(URL, "Autovacuum tuning", signed(), "user");
+        n.stripUnsignedContent();
+        assertEquals("Autovacuum tuning", n.dc_title());
+        assertTrue(n.provenance() != null);
+        assertEquals(null, n.getFieldValue(net.yacy.search.schema.CollectionSchema.text_t.getSolrFieldName()));
+        assertEquals(null, n.getFieldValue(net.yacy.search.schema.CollectionSchema.description_txt.getSolrFieldName()));
+        assertEquals(null, n.getFieldValue(net.yacy.search.schema.CollectionSchema.author.getSolrFieldName()));
+    }
+
+    @Test
+    public void testExternalAndRemoteServingDecisions() {
+        assertTrue(Provenance.accept(Provenance.external()));
+        assertFalse(Provenance.external().isTrusted());
+        final Provenance.Verdict invalid = verifyAsOther("1|x|y|z", URL, "t", true);
+        assertFalse(Provenance.acceptForRemotePeer(invalid));
+        assertTrue(Provenance.acceptForRemotePeer(verifyAsOther(signed(), URL, "Autovacuum tuning", false)));
+        assertTrue(Provenance.acceptForRemotePeer(verifyAsOther(null, URL, "t", false)));
+    }
+
+    @Test
+    public void testSnippetNeedsAProvenAddress() {
+        final PeerIdentity other = PeerIdentity.forKeys(Ed25519.generate());
+        final java.util.concurrent.ConcurrentHashMap<String, String> dna = new java.util.concurrent.ConcurrentHashMap<>();
+        dna.put(net.yacy.peers.Seed.NAME, "p");
+        dna.put(net.yacy.peers.Seed.PORT, "8090");
+        dna.put(net.yacy.peers.Seed.IP, "192.0.2.5");
+        final net.yacy.peers.Seed seed = new net.yacy.peers.Seed(other.peerHash(), dna);
+        SeedSignature.sign(seed, other);
+        final Provenance.Verdict fromOther = new Provenance.Verdict(Provenance.Status.TRUSTED, other.peerHash(), null, null);
+        ProvenAddresses.clear();
+        assertFalse(Provenance.keepSnippet(fromOther, seed));
+        ProvenAddresses.prove(other.peerHash(), "192.0.2.5");
+        assertTrue(Provenance.keepSnippet(fromOther, seed));
+        // a copy of the seed that points somewhere else is not proven
+        seed.setIP("198.51.100.9");
+        assertFalse(Provenance.keepSnippet(fromOther, seed));
+        ProvenAddresses.clear();
+    }
+
+    @Test
+    public void testPeerIdAndTokenChecks() {
+        assertTrue(P2PRoute.isLibp2pPeerId(PeerIdentity.forKeys(Ed25519.generate()).libp2pPeerId()));
+        assertFalse(P2PRoute.isLibp2pPeerId("12D3KooWshort"));
+        assertFalse(P2PRoute.isLibp2pPeerId(null));
+        assertFalse(P2PRoute.isSidecarToken("anything")); // no token initialized in tests
+    }
+
+    @Test
+    public void testRemoteSearchTimeIsCapped() {
+        assertEquals(10000L, TrustPolicy.clampRemoteSearchTime(60000L));
+        assertEquals(4000L, TrustPolicy.clampRemoteSearchTime(4000L));
+        assertEquals(TrustPolicy.REMOTESEARCH_MAXTIME_DEFAULT, TrustPolicy.clampRemoteSearchTime(0L));
+    }
+
     @Test
     public void testSplitHashes() {
         assertEquals(2, Provenance.splitHashes("AAAAAAAAAAAABBBBBBBBBBBB").size());

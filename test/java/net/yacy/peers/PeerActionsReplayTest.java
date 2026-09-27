@@ -59,6 +59,15 @@ public class PeerActionsReplayTest {
     }
 
     @Test
+    public void testStaleSignatureOfUnknownPeerIsRejected() {
+        final KeyPair k = Ed25519.generate();
+        final String hash = PeerIdentityTestAccess.identity(k).peerHash();
+        final Seed s = signed(k, hash, "8090", "192.0.2.1");
+        s.put(Seed.SIGT, Long.toString(System.currentTimeMillis() - 2 * PeerActions.MAX_SIGNATURE_AGE));
+        assertNotNull(PeerActions.replayReason(s, null, true));
+    }
+
+    @Test
     public void testFutureSignatureIsRejected() {
         final KeyPair k = Ed25519.generate();
         final String hash = PeerIdentityTestAccess.identity(k).peerHash();

@@ -52,7 +52,9 @@ public final class Provenance {
         /** no author signature */
         UNSIGNED,
         /** a signature that does not match the document: always rejected */
-        INVALID
+        INVALID,
+        /** a result of an external search engine the administrator configured (heuristics, federated search) */
+        EXTERNAL
     }
 
     public static final class Verdict {
@@ -163,10 +165,24 @@ public final class Provenance {
      */
     public static boolean accept(final Verdict v) {
         if (v == null || v.status == Status.INVALID) return false;
+        if (v.status == Status.EXTERNAL) return true; // the administrator chose these sources
         if (!v.tags().isEmpty()) {
             for (final String t : TrustPolicy.excludedTags()) if (v.tags().contains(t)) return false;
         }
         return v.isTrusted() || TrustPolicy.acceptUnverifiedResults();
+    }
+
+    /**
+     * The decision of a peer that answers the search of another peer: it only drops what is certainly wrong
+     * (invalid signatures); the searcher applies its own trust set to the rest.
+     */
+    public static boolean acceptForRemotePeer(final Verdict v) {
+        return v != null && v.status != Status.INVALID;
+    }
+
+    /** @return the verdict for results of external search engines */
+    public static Verdict external() {
+        return new Verdict(Status.EXTERNAL, null, null, null);
     }
 
     /** @return the verdict for an unsigned document of the own index that did not come from other peers */
@@ -177,7 +193,7 @@ public final class Provenance {
     /** @return true if the peer that sent the result wrote the document and is trusted */
     public static boolean isFromAuthor(final Verdict v, final net.yacy.peers.Seed answering) {
         return v != null && answering != null && v.authorHash != null && v.authorHash.equals(answering.hash)
-                && v.isTrusted() && isTrustedPeer(answering);
+                && v.isTrusted() && isTrustedPeer(answering) && ProvenAddresses.isProven(answering);
     }
 
     /** @return true if the peer is in the trust set, or signed when no coordinator is configured */
@@ -196,6 +212,8 @@ public final class Provenance {
      */
     public static boolean keepSnippet(final Verdict v, final net.yacy.peers.Seed answering) {
         if (answering == null) return true;
+        // the address of a seed is not signed: only believe that the owner answered at a proven address
+        if (!ProvenAddresses.isProven(answering)) return false;
         if (v != null && v.authorHash != null && v.authorHash.equals(answering.hash)) return true;
         return isTrustedPeer(answering);
     }

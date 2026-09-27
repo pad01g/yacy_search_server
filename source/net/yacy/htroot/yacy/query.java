@@ -114,7 +114,7 @@ public final class query {
             // prove that this address belongs to the key in our seed (hello back-ping, see docs/trust-and-nat.md)
             final String challenge = post.get("challenge", "");
             final PeerIdentity identity = PeerIdentity.get();
-            if (!challenge.isEmpty() && challenge.length() <= 64 && identity != null) {
+            if (SeedSignature.isValidChallenge(challenge) && identity != null) {
                 final String client = header.getRemoteAddr();
                 final String sidecarPeer = header.get(P2PRoute.SIDECAR_HEADER);
                 final String observed = sidecarPeer != null && P2PRoute.isSidecarClient(client, sidecarPeer) ? SeedSignature.OBSERVED_SIDECAR : client;

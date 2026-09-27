@@ -2101,7 +2101,7 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
             verdict = resultEntry.verifyProvenanceLocal();
             resultEntry.setTrustVerdict(verdict);
         }
-        if (!Provenance.accept(verdict)) return;
+        if (this.query.servesRemotePeer() ? !Provenance.acceptForRemotePeer(verdict) : !Provenance.accept(verdict)) return;
         // a word index entry (e.g. from a DHT transfer) must not attach a document to words its author did not index
         if (resultEntry.word() != null && !verdict.containsAll(this.query.getQueryGoal().getIncludeHashes())) return;
         final long rankingBoost = isPreferredLocalRichCandidate(resultEntry) ? LOCAL_RICH_TEXT_RANKING_BOOST : 0L;

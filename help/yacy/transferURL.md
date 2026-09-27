@@ -56,6 +56,10 @@ Example request shape:
 GET or POST /yacy/transferURL.html?url=...&iam=...&key=...&urlc=...&youare=...
 ```
 
+### Author Signatures
+
+Each transferred document may carry the author signature in the `prov` property (`1|<author key>|<signature>|<word bloom filter>`, see `docs/trust-and-nat.md`). The receiving peer rejects documents whose signature does not match their URL and title. Unsigned documents are only stored if the receiver runs in open mode (`trust.search.acceptUnverified=true`). The storing peer does not need to trust the author: searchers verify the signature themselves.
+
 ## What To Expect
 
 Expect a compact service response rather than a teaching interface. The response may be XML, RSS, JSON-like text, plain text, or a small HTML template depending on the endpoint.

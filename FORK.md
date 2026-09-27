@@ -2,7 +2,13 @@
 
 [yacy/yacy_search_server](https://github.com/yacy/yacy_search_server) master `b50b76b` からの派生。
 変更はすべて branch `improved-search` にある。効果は [pad01g/yacy-lab](https://github.com/pad01g/yacy-lab) で
-upstream とフォークの閉じた P2P 網（各 3 ノード）を docker compose で立てて測っている。
+docker compose の閉じた P2P 網を立てて測っている（検索品質: upstream とフォーク各 3 ノード / 信頼と NAT 越え: 8 ピア + リレー + NAT）。
+
+変更は 2 つ:
+
+1. **検索品質**（下の表）: 1 語だけ一致する頁が上位に来る、CJK が引けない、小さな網で他ピアを検索しない。
+2. **ピアの身元・信頼・NAT 越え**（[docs/trust-and-nat.md](docs/trust-and-nat.md)）: Ed25519 の鍵から決まるピア ID と seed の署名、
+   コーディネータが署名した信頼ピアの一覧、文書ごとの作者の署名、NAT の内側のピアを libp2p のリレーで届かせる sidecar。
 
 **既存ピアとの互換性は考慮していない。** CJK の単語 hash が変わるため、日本語・中国語・韓国語の DHT 交換は
 このフォーク同士でしか成り立たない。既存の索引は再索引が必要。
@@ -23,10 +29,39 @@ upstream とフォークの閉じた P2P 網（各 3 ノード）を docker comp
 
 設定値の説明は `help/RankingSolr_p.md` の "Related Settings Outside This Page" にある。
 
+## ピアの身元・信頼・NAT 越え
+
+設計と設定値の一覧は [docs/trust-and-nat.md](docs/trust-and-nat.md)。既定の動作:
+
+- 署名のない（旧実装の）seed は受け入れない（`trust.seed.acceptUnsigned=false`）。
+- 検索結果は、作者の署名が正しく、作者がコーディネータの一覧に載ったピアの文書だけを使う（`trust.search.acceptUnverified=false`）。
+  **`trust.coordinators` が空なら自ピアの文書だけ**になる（閉じる側に倒す）。閉じた網で全員を信頼するなら `trust.signedOnly=true`。
+  旧網も検索する「開放モード」は `trust.seed.acceptUnsigned=true` + `trust.search.acceptUnverified=true`（未検証の結果は印付きで後ろに並ぶ）。
+- 他ピアの応答は既定で 5 秒待ち（`remotesearch.maxtime`、10 秒まで）、届いた順に表示する。
+- NAT 越えは `p2p.sidecar.url` を設定し、`sidecar/` の sidecar を同じ鍵（`DATA/SETTINGS/peer.key`）とトークン
+  （`DATA/SETTINGS/sidecar.token`）で動かしたときだけ有効。
+
+鍵と一覧は `TrustTool` で作る（Docker イメージの中なら `/opt/yacy_search_server/lib/*`）:
+
+```sh
+T() { java -cp '/opt/yacy_search_server/lib/*' net.yacy.peers.trust.TrustTool "$@"; }
+T keygen coordinator.key                    # コーディネータの鍵。表示される public key を各ピアの trust.coordinators に
+T keygen operator.key
+T delegate coordinator.key <operator の public key> freeworld 1 > delegation.json
+T peerlist operator.key freeworld 1 peers.json > list.json   # peers.json: [{"pk": "<ピアの PK>", "priority": 100, "tags": ["ads"]}]
+T bundle delegation.json list.json > bundle.json             # trust.bundle.urls で配るか、どれか 1 つのピアの /yacy/trust.json へ
+T verify bundle.json freeworld <coordinator の public key>
+```
+
+ピアの公開鍵は `/yacy/seedlist.json?my=` の `PK`、または `T pubkey DATA/SETTINGS/peer.key`。
+委任の失効は `delegate ... <より大きい版> --revoke`。
+
 ## ビルドとテスト
 
 ```sh
 docker build -t yacy-lab/fork:latest -f docker/Dockerfile .
+docker build -t yacy-lab/sidecar:latest sidecar/
+(cd sidecar && go test ./...)          # Go 1.26 以上
 ```
 
 `ant compileTest` は upstream の時点で既存テスト（Solr クラスを使うもの）のコンパイルに失敗する。
@@ -34,10 +69,17 @@ docker build -t yacy-lab/fork:latest -f docker/Dockerfile .
 
 ```sh
 CP="build:lib/*:libt/*"
-javac -encoding UTF-8 -d /tmp/t -cp "$CP" test/java/net/yacy/document/{CJKBigramsTest,WordTokenizerTest,TokenizerTest}.java \
-  test/java/net/yacy/search/query/{QueryGoalCJKTest,QueryGoalTest,QueryParamsTest,SearchEventCoverageTest}.java \
-  test/java/net/yacy/search/snippet/TextSnippetTest.java
-java -cp "/tmp/t:$CP" org.junit.runner.JUnitCore net.yacy.document.CJKBigramsTest net.yacy.document.WordTokenizerTest \
-  net.yacy.document.TokenizerTest net.yacy.search.query.QueryGoalCJKTest net.yacy.search.query.QueryGoalTest \
-  net.yacy.search.query.QueryParamsTest net.yacy.search.query.SearchEventCoverageTest net.yacy.search.snippet.TextSnippetTest
+TESTS="net.yacy.document.CJKBigramsTest net.yacy.document.WordTokenizerTest net.yacy.document.TokenizerTest
+  net.yacy.search.query.QueryGoalCJKTest net.yacy.search.query.QueryGoalTest net.yacy.search.query.QueryParamsTest
+  net.yacy.search.query.SearchEventCoverageTest net.yacy.search.snippet.TextSnippetTest
+  net.yacy.peers.trust.PeerIdentityTest net.yacy.peers.trust.SeedSignatureTest net.yacy.peers.trust.TrustStoreTest
+  net.yacy.peers.trust.ProvenanceTest net.yacy.peers.trust.TrustServiceTest net.yacy.peers.PeerActionsReplayTest
+  net.yacy.peers.SeedTest net.yacy.peers.SeedDBTest net.yacy.peers.ProtocolTest net.yacy.htroot.yacy.SearchPeerResolutionTest"
+ant compile
+FILES="test/java/net/yacy/peers/trust/PeerIdentityTestAccess.java"
+for t in $TESTS; do FILES="$FILES test/java/$(echo $t | tr . /).java"; done
+javac -encoding UTF-8 -d /tmp/t -cp "$CP" $FILES
+java -cp "/tmp/t:$CP" org.junit.runner.JUnitCore $TESTS
 ```
+
+複数ピアでの確認（署名・一覧・タグ・偽の作者・NAT 越え・一覧の更新と失効）は yacy-lab の `compose.trust.yaml`。

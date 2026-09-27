@@ -63,6 +63,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -119,6 +120,7 @@ import net.yacy.kelondro.util.MemoryControl;
 import net.yacy.peers.graphics.ProfilingGraph;
 import net.yacy.peers.trust.Ed25519;
 import net.yacy.peers.trust.P2PRoute;
+import net.yacy.peers.trust.ProvenAddresses;
 import net.yacy.peers.trust.Provenance;
 import net.yacy.peers.trust.SeedSignature;
 import net.yacy.peers.trust.TrustPolicy;
@@ -407,19 +409,30 @@ public final class Protocol {
             Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " did not prove the ownership of its key");
             return false;
         }
-        if (!observedIsMine(observed, target)) {
+        if (!observedIsMine(observed, target, peer.hash)) {
             Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " answered a request from " + observed + ", not from this peer");
             return false;
         }
+        // the owner of the key answers at this address (through a tunnel, libp2p authenticates the key anyway)
+        if (!P2PRoute.isRouted(target)) ProvenAddresses.prove(peer.hash, resolvedHost(target));
         return true;
     }
+
+    /**
+     * Addresses that peers with verified keys reported for us although they are not among our known addresses:
+     * observed address -> peers. When our public address changes, every partner reports the new one; after
+     * {@link #ADDRESS_CHANGE_QUORUM} independent peers agree, we accept it (otherwise no hello could ever succeed
+     * again, and our own address would never be corrected).
+     */
+    private static final Map<String, Set<String>> unknownObserved = new ConcurrentHashMap<>();
+    static final int ADDRESS_CHANGE_QUORUM = 3;
 
     /**
      * @return true if the address the other peer saw the request coming from is ours. Through a sidecar tunnel it must
      *         be the sidecar marker. A peer that others cannot reach directly (junior, relayed, leecher) may not
      *         know its public address behind the NAT and accepts any address.
      */
-    static boolean observedIsMine(final String observed, final MultiProtocolURL target) {
+    static boolean observedIsMine(final String observed, final MultiProtocolURL target, final String peerHash) {
         if (P2PRoute.isRouted(target)) return SeedSignature.OBSERVED_SIDECAR.equals(observed);
         if (SeedSignature.OBSERVED_SIDECAR.equals(observed)) return false;
         final Switchboard sb = Switchboard.getSwitchboard();
@@ -429,7 +442,12 @@ public final class Protocol {
         mine.addAll(sb.myPublicIPs());
         for (final String ip : mine) if (sameAddress(ip, observed)) return true;
         if (Domains.isLocalhost(observed)) return Domains.isLocalhost(target.getHost());
-        return !(my.isSenior() || my.isPrincipal()) || !Seed.REACH_DIRECT.equals(my.getReach());
+        if (!(my.isSenior() || my.isPrincipal()) || !Seed.REACH_DIRECT.equals(my.getReach())) return true;
+        if (observed == null || !com.google.common.net.InetAddresses.isInetAddress(observed.replace("[", "").replace("]", ""))) return false;
+        if (unknownObserved.size() > 1000) unknownObserved.clear();
+        final Set<String> reporters = unknownObserved.computeIfAbsent(observed, k -> ConcurrentHashMap.newKeySet());
+        if (peerHash != null) reporters.add(peerHash);
+        return reporters.size() >= ADDRESS_CHANGE_QUORUM;
     }
 
     private static boolean sameAddress(final String a, final String b) {
@@ -842,7 +860,8 @@ public final class Protocol {
                 urlEntry.setSnippet(null);
                 urlEntry.stripUnsignedContent();
             }
-            if (Provenance.isFromAuthor(verdict, target)) storable.add(urlEntry);
+            final boolean store = Provenance.isFromAuthor(verdict, target);
+            if (store) storable.add(urlEntry);
 
             // passed all checks, store url
             storeDocs.add(urlEntry);
@@ -870,8 +889,9 @@ public final class Protocol {
                 }
             }
 
-            // add the url entry to the word indexes
-            for ( final ReferenceContainer<WordReference> c : container ) {
+            // add the url entry to the word indexes; only for documents that are stored, otherwise the references
+            // would point to metadata the index does not have
+            if (store) for ( final ReferenceContainer<WordReference> c : container ) {
                 try {
                     c.add(entry);
                 } catch (final SpaceExceededException e ) {
@@ -1514,7 +1534,7 @@ public final class Protocol {
 
             // the author signature decides whether the result is used (see docs/trust-and-nat.md)
             final Provenance.Verdict verdict = localsearch ? urlEntry.verifyProvenanceLocal() : urlEntry.verifyProvenance();
-            if (!Provenance.accept(verdict)) {
+            if (event.query.servesRemotePeer() ? !Provenance.acceptForRemotePeer(verdict) : !Provenance.accept(verdict)) {
                 if (Network.log.isInfo()) Network.log.info((localsearch ? "local" : "remote") + " search (solr): rejected " + verdict.status + " url " + urlEntry.url().toNormalform(true)
                         + (target == null ? "" : " from peer " + target.getName()));
                 continue;

@@ -176,6 +176,22 @@ public final class QueryParams {
 	 * </ul> 
 	 */
     private boolean strictContentDom = false;
+    /**
+     * true if this search answers the search of another peer (yacy/search.html): then only documents with an invalid
+     * signature are dropped, the searcher applies its own trust set (see docs/trust-and-nat.md)
+     */
+    private volatile boolean servesRemotePeer = false;
+
+    /** mark this search as the answer to another peer's search; it gets its own cache id */
+    public void setServesRemotePeer() {
+        this.servesRemotePeer = true;
+        this.idCache = null;
+        this.idCacheAnon = null;
+    }
+
+    public boolean servesRemotePeer() {
+        return this.servesRemotePeer;
+    }
     
 	/**
 	 * The maximum number of suggestions ("Did you mean") to display at the top of
@@ -1013,6 +1029,7 @@ public final class QueryParams {
             context.append(Base64Order.enhancedCoder.encodeString(this.prefer.toString())).append(asterisk);
             context.append(Base64Order.enhancedCoder.encodeString(this.urlMaskString)).append(asterisk);
             context.append(this.modifier.sitehash).append(asterisk);
+            context.append(this.servesRemotePeer ? "remote" : "").append(asterisk); // other trust filtering
             context.append(this.modifier.author).append(asterisk);
             context.append(this.modifier.protocol).append(asterisk);
             context.append(this.modifier.filetype).append(asterisk);

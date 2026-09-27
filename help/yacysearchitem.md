@@ -66,8 +66,8 @@ Every result carries the verdict on its author signature (see `docs/trust-and-na
 
 | Field (JSON) | Meaning |
 | --- | --- |
-| `verified` | `true` if the document is signed by this peer or by an author in the trust set |
-| `trust` | `self`, `trusted`, `signed` (valid signature, author not trusted), `unsigned` |
+| `verified` | the string `"true"` if the document is signed by this peer or by an author in the trust set, otherwise `"false"`. Unsigned documents in the local index that did not arrive by DHT transfer (crawled before signing was introduced, or imported by the administrator) count as this peer's own |
+| `trust` | `self`, `trusted`, `signed` (valid signature, author not trusted), `unsigned`, `external` (result of a federated external search engine) |
 | `trustTags` | tags the author declared in the trust list, e.g. `ads`, separated by spaces |
 
 Unverified results are only delivered with `trust.search.acceptUnverified=true` and always rank below verified ones. Results are delivered in the order they arrived; request the search again with `resortCachedResults=true` to get the final order. The HTML result shows an "Unverified" label and the declared tags.

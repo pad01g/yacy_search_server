@@ -74,6 +74,10 @@ Example request shape:
 GET or POST /yacy/search.html?iam=...&language=...&query=...&contentdom=...&abstracts=...&author=...
 ```
 
+### Trust And Time Limits
+
+This fork checks the author signature of every document before it answers (see `docs/trust-and-nat.md` and `yacy/trust.md`). Documents with an invalid signature are never returned. Documents whose author is not in the trust set of this peer, and unsigned documents that arrived by DHT transfer, are returned only if the peer runs in open mode (`trust.search.acceptUnverified=true`). The snippet, text and description of a document are only returned when this peer is the author or the author is trusted, because they are not covered by the signature. The `time` parameter (search time in milliseconds) is capped by this peer's `remotesearch.maxtime` and never exceeds 10000 ms.
+
 ## What To Expect
 
 Expect a compact service response rather than a teaching interface. The response may be XML, RSS, JSON-like text, plain text, or a small HTML template depending on the endpoint.

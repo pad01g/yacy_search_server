@@ -57,6 +57,10 @@ Example request shape:
 GET or POST /yacy/seedlist.html?peername=...&address=...&callback=...&id=...&maxcount=...
 ```
 
+### Signed Seeds
+
+In this fork each seed carries the public key `PK` of the peer, the signature `Sig` and the signing time `SigT`; the peer hash is derived from `PK`. The fields `Reach`, `P2PA` and `RDS` describe whether the peer is reached through a libp2p relay, its circuit addresses and whether it offers DHT storage; `TV` announces the version of the trust lists the peer holds; `Tags` are self-declared tags. Unsigned seeds are rejected unless `trust.seed.acceptUnsigned=true`. `IP` and the counters are not signed; peers only believe an address after the owner of the key answered a hello challenge there.
+
 ## What To Expect
 
 Expect a compact service response rather than a teaching interface. The response may be XML, RSS, JSON-like text, plain text, or a small HTML template depending on the endpoint.

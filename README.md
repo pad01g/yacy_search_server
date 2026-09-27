@@ -1,4 +1,4 @@
-> **This is a fork** with search quality fixes (strict minimum match, term coverage weighting, CJK bigram indexing). See [FORK.md](FORK.md) and the experiment in [pad01g/yacy-lab](https://github.com/pad01g/yacy-lab).
+> **This is a fork** with search quality fixes (strict minimum match, term coverage weighting, CJK bigram indexing) and a peer trust layer (Ed25519 peer keys and signed seeds, coordinator-signed trust lists, per-document author signatures, NAT traversal through a libp2p relay sidecar). It does not interoperate with the public YaCy network by default. See [FORK.md](FORK.md) and the experiment in [pad01g/yacy-lab](https://github.com/pad01g/yacy-lab).
 
 <div align="center">
 <h1 align="center">YaCy</h1>

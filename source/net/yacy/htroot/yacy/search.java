@@ -263,6 +263,7 @@ public final class search {
                     new HashSet<>()
                     );
             theQuery.setStrictContentDom(strictContentDom);
+            theQuery.setServesRemotePeer();
             Network.log.info("INIT HASH SEARCH (abstracts only): " + QueryParams.anonymizedQueryHashes(theQuery.getQueryGoal().getIncludeHashes()) + " - " + theQuery.itemsPerPage() + " links");
 
             final long timer = System.currentTimeMillis();
@@ -328,6 +329,7 @@ public final class search {
                     new HashSet<>()
                     );
             theQuery.setStrictContentDom(strictContentDom);
+            theQuery.setServesRemotePeer();
             Network.log.info("INIT HASH SEARCH (query-" + abstracts + "): " + QueryParams.anonymizedQueryHashes(theQuery.getQueryGoal().getIncludeHashes()) + " - " + theQuery.itemsPerPage() + " links");
             EventChannel.channels(EventChannel.REMOTESEARCH).addMessage(new RSSMessage("Remote Search Request from " + ((remoteSeed == null) ? "unknown" : remoteSeed.getName()), QueryParams.anonymizedQueryHashes(theQuery.getQueryGoal().getIncludeHashes()), ""));
             if (sb.getConfigBool(SwitchboardConstants.DECORATION_AUDIO, false)) Audio.Soundclip.remotesearch.play(-10.0f);

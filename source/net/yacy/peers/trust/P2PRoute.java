@@ -103,6 +103,18 @@ public final class P2PRoute {
         return token == null ? "" : token;
     }
 
+    /** @return true if the value is the sidecar token (constant time) */
+    public static boolean isSidecarToken(final String value) {
+        final String t = token;
+        if (t == null || t.isEmpty() || value == null) return false;
+        return java.security.MessageDigest.isEqual(t.getBytes(StandardCharsets.US_ASCII), value.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    /** @return true for a base58 libp2p peer id of an Ed25519 key (12D3KooW...) */
+    public static boolean isLibp2pPeerId(final String id) {
+        return id != null && id.length() == 52 && id.startsWith("12D3KooW") && id.matches("[1-9A-HJ-NP-Za-km-z]+");
+    }
+
     /**
      * @return the base URL (http://127.0.0.1:port, without trailing slash) to use instead of http://ip:port for
      *         the given peer, or null if the peer is reached directly or no tunnel is available

@@ -41,6 +41,7 @@ import net.yacy.cora.federate.solr.SolrType;
 import net.yacy.cora.storage.Configuration;
 import net.yacy.cora.util.ConcurrentLog;
 import net.yacy.kelondro.data.meta.URIMetadataNode;
+import net.yacy.peers.trust.Provenance;
 import net.yacy.search.Switchboard;
 import net.yacy.search.query.SearchEvent;
 import net.yacy.search.schema.CollectionSchema;
@@ -127,6 +128,8 @@ public abstract class AbstractFederateSearchConnector implements FederateSearchC
                 if (doclist != null) {
                 	LOG.info("Got " + doclist.size() + " documents from " +  instancename);
                     Map<String, LinkedHashSet<String>> snippets = new HashMap<>(); // add nodes doesn't allow null
+                    // results of external engines carry no author signature (see docs/trust-and-nat.md)
+                    for (final URIMetadataNode doc : doclist) doc.setTrustVerdict(Provenance.external());
                     theSearch.addNodes(doclist, null, snippets, false, instancename, doclist.size(), true);
                     
                     for (URIMetadataNode doc : doclist) {

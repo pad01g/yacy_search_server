@@ -294,17 +294,27 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
         return Provenance.localDocument();
     }
 
-    /** remove the content fields that the author signature does not cover (used for copies of untrusted peers) */
+    /**
+     * Keep only the fields the author signature covers (URL, title) and technical fields needed to rank and list the
+     * result; everything else (text, description, keywords, headings, image and link lists, author, ...) is removed.
+     * Used for copies of documents that an untrusted peer sent.
+     */
     public void stripUnsignedContent() {
-        for (final CollectionSchema f : UNSIGNED_CONTENT) this.removeFields(f.getSolrFieldName());
+        for (final String name : new ArrayList<String>(this.getFieldNames())) {
+            if (!SIGNED_OR_TECHNICAL.contains(name)) this.removeFields(name);
+        }
         this.snippet = null;
     }
 
-    private static final CollectionSchema[] UNSIGNED_CONTENT = {
-            CollectionSchema.description_txt, CollectionSchema.text_t, CollectionSchema.keywords,
-            CollectionSchema.h1_txt, CollectionSchema.h2_txt, CollectionSchema.h3_txt, CollectionSchema.h4_txt,
-            CollectionSchema.h5_txt, CollectionSchema.h6_txt, CollectionSchema.images_text_t, CollectionSchema.images_alt_sxt,
-            CollectionSchema.synonyms_sxt };
+    private static final java.util.Set<String> SIGNED_OR_TECHNICAL = new java.util.HashSet<String>(java.util.Arrays.asList(
+            CollectionSchema.id.getSolrFieldName(), CollectionSchema.sku.getSolrFieldName(), CollectionSchema.title.getSolrFieldName(),
+            CollectionSchema.provenance_s.getSolrFieldName(), CollectionSchema.host_s.getSolrFieldName(), CollectionSchema.host_id_s.getSolrFieldName(),
+            CollectionSchema.content_type.getSolrFieldName(), CollectionSchema.last_modified.getSolrFieldName(),
+            CollectionSchema.load_date_dt.getSolrFieldName(), CollectionSchema.fresh_date_dt.getSolrFieldName(),
+            CollectionSchema.size_i.getSolrFieldName(), CollectionSchema.wordcount_i.getSolrFieldName(),
+            CollectionSchema.language_s.getSolrFieldName(), CollectionSchema.collection_sxt.getSolrFieldName(),
+            CollectionSchema.httpstatus_i.getSolrFieldName(), CollectionSchema.url_protocol_s.getSolrFieldName(),
+            CollectionSchema.url_file_ext_s.getSolrFieldName(), "score"));
 
     public String dc_title() {
         ArrayList<String> a = getStringList(CollectionSchema.title);

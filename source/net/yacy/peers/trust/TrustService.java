@@ -141,10 +141,12 @@ public final class TrustService {
     }
 
     private static void setOrRemove(final Seed seed, final String key, final String value) {
-        if (value == null) {
-            seed.getMap().remove(key);
-        } else if (!value.equals(seed.get(key, null))) {
-            seed.put(key, value);
+        synchronized (seed.getMap()) { // Seed.genSeedStr signs and serializes under this lock
+            if (value == null) {
+                seed.getMap().remove(key);
+            } else if (!value.equals(seed.get(key, null))) {
+                seed.put(key, value);
+            }
         }
     }
 

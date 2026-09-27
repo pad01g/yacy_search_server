@@ -93,6 +93,10 @@ Example request shape:
 GET /yacysearch.html?query=climate+data&maximumRecords=10&resource=local&contentdom=text&verify=iffresh
 ```
 
+### Trust Of Remote Results
+
+By default only results whose author signature is valid and whose author is in the trust set are shown (see `docs/trust-and-nat.md`). Without configured coordinators (`trust.coordinators`) this means only documents of this peer, unless `trust.signedOnly=true`. With `trust.search.acceptUnverified=true` other results are shown too, labeled "Unverified" and always below verified ones; results with an invalid signature are never shown. Remote peers are waited for up to `remotesearch.maxtime` milliseconds (default 5000, at most 10000); results are shown as they arrive.
+
 ## What To Expect
 
 The response is an HTML result page. It contains result entries, navigators/facets when enabled, and hidden references used by authenticated result actions. If a query returns too little, first check whether the crawler has indexed the relevant site and whether `urlmaskfilter`, `collection`, or `contentdom` narrowed the request too far.

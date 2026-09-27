@@ -732,7 +732,7 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         final String key = SeedSignature.cacheKey(this);
         final SigCheck cached = this.sigCheck;
         if (cached != null && key.equals(cached.key)) return cached.status;
-        final SeedSignature.Status status = SeedSignature.verify(this);
+        final SeedSignature.Status status = SeedSignature.verifyCached(this);
         this.sigCheck = new SigCheck(key, status);
         return status;
     }
@@ -1576,11 +1576,18 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
     }
 
     public final String genSeedStr(final String key) {
-        // the own seed is signed each time its signed part changed
+        // the own seed is signed each time its signed part changed; sign and serialize under the same lock, other
+        // threads change signed fields (TrustService, hello)
         final PeerIdentity identity = PeerIdentity.get();
-        if (identity != null && identity.peerHash().equals(this.hash)) SeedSignature.sign(this, identity);
-        // use a default encoding
-        final String r = toString();
+        final String r;
+        if (identity != null && identity.peerHash().equals(this.hash)) {
+            synchronized (this.dna) {
+                SeedSignature.sign(this, identity);
+                r = toString();
+            }
+        } else {
+            r = toString();
+        }
         final String z = crypt.simpleEncode(r, key, 'z');
         final String b = crypt.simpleEncode(r, key, 'b');
         // the compressed string may be longer than the uncompressed if there is too much overhead for compression meta-info

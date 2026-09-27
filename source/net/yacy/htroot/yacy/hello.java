@@ -42,6 +42,7 @@ import net.yacy.cora.protocol.HeaderFramework;
 import net.yacy.cora.protocol.RequestHeader;
 import net.yacy.peers.DHTSelection;
 import net.yacy.peers.Network;
+import net.yacy.peers.PeerActions;
 import net.yacy.peers.Protocol;
 import net.yacy.peers.Seed;
 import net.yacy.peers.graphics.ProfilingGraph;
@@ -61,11 +62,7 @@ public final class hello {
     // http://localhost:8090/yacy/hello.html?count=1&seed=p|{Hash=sCJ6Tq8T0N9x,Port=8090,PeerType=junior}
     // http://localhost:8090/yacy/hello.html?count=10&seed=z|H4sIAAAAAAAAADWQW2vDMAyF_81eJork3GyGX-YxGigly2WFvZTQijbQJsHx1pWx_z7nMj1J4ug7B_2s6-GsP5q3G-G6vBz2e0iz8t6zfuBr7-5PUNanQfulhqyzTkuUCFXvmitrBJtq4ed3tkPTtRpXhIiRDAmq0uhHFIiQMduJ-NXYU9NCbrrP1vnjIdUqgk09uIK51V6rMBRIilAo2NajwzfhGcx8QUKsEIp5iCJo-eaTVUXPfPQ4k5dm4pp8NzaESsLzS-14QVNIMlA-ka2m1JuZJJWIBRwPo0GIIiYp4zCSkC5GQSLiJIah0p6X_rvlS-MTbWdhkCSBIni9jA_rfP3-Ae1Oye9dAQAA
     private static long sigTime(final Seed s) {
-        try {
-            return Long.parseLong(s.get(Seed.SIGT, "0"));
-        } catch (final NumberFormatException e) {
-            return 0;
-        }
+        return SeedSignature.sigTime(s);
     }
 
     public static serverObjects respond(final RequestHeader header, final serverObjects post, final serverSwitch env) {
@@ -113,7 +110,7 @@ public final class hello {
         final PeerIdentity identity = PeerIdentity.get();
         final String observed = viaSidecar ? SeedSignature.OBSERVED_SIDECAR : ias.getHostAddress();
         prop.put("challengeFor", observed);
-        if (!challenge.isEmpty() && challenge.length() <= 64 && identity != null) {
+        if (SeedSignature.isValidChallenge(challenge) && identity != null) {
             prop.put("challengeSig", SeedSignature.answerChallenge(identity, challenge, observed));
         }
         // final long  magic     = post.getLong("magic", 0);
@@ -269,9 +266,9 @@ public final class hello {
             // A failed back-ping of an unauthenticated caller must not demote a peer we already know with a valid
             // signature: anybody can resend a signed seed of another peer. Only a newer signature, which only the
             // owner can make (e.g. after it switched to leecher), may replace it (see docs/trust-and-nat.md)
-            final Seed known = sb.peers.getConnected(remoteSeed.hash);
-            final boolean demotesKnownPeer = known != null && known.isSigned()
-                    && !(remoteSeed.isSigned() && sigTime(remoteSeed) > sigTime(known));
+            final Seed known = sb.peers.get(remoteSeed.hash); // connected, disconnected or potential
+            final boolean demotesKnownPeer = (known != null && known.isSigned() && !(remoteSeed.isSigned() && sigTime(remoteSeed) > sigTime(known)))
+                    || PeerActions.replayReason(remoteSeed, known, true) != null;
             if ((remoteSeed.hash != null) && (remoteSeed.isProper(false) == null) && !demotesKnownPeer && !viaSidecar) {
                 sb.peers.peerActions.peerPing(remoteSeed);
             }

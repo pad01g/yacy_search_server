@@ -54,6 +54,8 @@ public class PeerActions {
 
     /** signatures may be at most this far in the future */
     static final long MAX_SIGNATURE_SKEW = 60L * 60L * 1000L;
+    /** seeds of unknown peers must have been signed within this time (owners sign again every week) */
+    static final long MAX_SIGNATURE_AGE = 30L * 24L * 60L * 60L * 1000L;
 
     /**
      * A seed signed by its owner must not be replaced by an older signed seed (replay of old ports, reach or tags),
@@ -61,10 +63,12 @@ public class PeerActions {
      * address. Called with the stored seed of the same hash, if any.
      * @return null if the seed may replace the stored one, otherwise the reason
      */
-    static String replayReason(final Seed seed, final Seed stored, final boolean direct) {
+    public static String replayReason(final Seed seed, final Seed stored, final boolean direct) {
         final long now = System.currentTimeMillis();
         final long sigT = sigTime(seed);
         if (sigT > now + MAX_SIGNATURE_SKEW) return "signature time in the future";
+        // a relayed copy of the seed of a peer that left long ago must not stay alive through its unsigned LastSeen
+        if (stored == null && seed.get(Seed.SIGT, null) != null && sigT < now - MAX_SIGNATURE_AGE) return "signature older than 30 days";
         if (stored == null || !stored.isSigned()) return null;
         if (!seed.isSigned()) return "unsigned seed for a signed peer";
         if (sigT < sigTime(stored)) return "older signature than the known one";
@@ -76,11 +80,7 @@ public class PeerActions {
     }
 
     private static long sigTime(final Seed s) {
-        try {
-            return Long.parseLong(s.get(Seed.SIGT, "0"));
-        } catch (final NumberFormatException e) {
-            return 0;
-        }
+        return SeedSignature.sigTime(s);
     }
 
     public boolean connectPeer(final Seed seed, final boolean direct) {

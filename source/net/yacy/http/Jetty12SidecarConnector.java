@@ -60,9 +60,21 @@ public final class Jetty12SidecarConnector {
     static final class RemotePeerCustomizer implements HttpConfiguration.Customizer {
         @Override
         public Request customize(final Request request, final HttpFields.Mutable responseHeaders) {
+            // the peer id is only believed from the sidecar: it sends the control token with every request. A request
+            // without it (another local process) keeps a remote address but loses the peer header.
             final String peer = request.getHeaders().get(P2PRoute.SIDECAR_HEADER);
-            final SocketAddress remote = new InetSocketAddress(P2PRoute.sidecarClientAddress(peer), 0);
+            final boolean fromSidecar = P2PRoute.isSidecarToken(request.getHeaders().get(P2PRoute.TOKEN_HEADER)) && P2PRoute.isLibp2pPeerId(peer);
+            final SocketAddress remote = new InetSocketAddress(P2PRoute.sidecarClientAddress(fromSidecar ? peer : null), 0);
+            // the token is not for the servlets
+            final HttpFields.Mutable mutable = HttpFields.build(request.getHeaders()).remove(P2PRoute.TOKEN_HEADER);
+            if (!fromSidecar) mutable.remove(P2PRoute.SIDECAR_HEADER);
+            final HttpFields headers = mutable.asImmutable();
             return new Request.Wrapper(request) {
+                @Override
+                public HttpFields getHeaders() {
+                    return headers;
+                }
+
                 @Override
                 public ConnectionMetaData getConnectionMetaData() {
                     return new ConnectionMetaData.Wrapper(super.getConnectionMetaData()) {

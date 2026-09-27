@@ -107,14 +107,25 @@ public class SeedSignatureTest {
         final PeerIdentity other = PeerIdentity.forKeys(Ed25519.generate());
         final Seed s = seedOf(id);
         SeedSignature.sign(s, id);
-        final String answer = SeedSignature.answerChallenge(id, "nonce-1", "192.0.2.9");
-        assertTrue(SeedSignature.checkChallenge(s, "nonce-1", "192.0.2.9", answer));
-        assertFalse(SeedSignature.checkChallenge(s, "nonce-2", "192.0.2.9", answer));
+        final String answer = SeedSignature.answerChallenge(id, "nonce-0001", "192.0.2.9");
+        assertTrue(SeedSignature.checkChallenge(s, "nonce-0001", "192.0.2.9", answer));
+        assertFalse(SeedSignature.checkChallenge(s, "nonce-0002", "192.0.2.9", answer));
         // the answer covers the address the peer saw the request coming from: a forwarded challenge is detected
-        assertFalse(SeedSignature.checkChallenge(s, "nonce-1", "198.51.100.1", answer));
+        assertFalse(SeedSignature.checkChallenge(s, "nonce-0001", "198.51.100.1", answer));
         // a peer at the address that does not own the key cannot answer
-        assertFalse(SeedSignature.checkChallenge(s, "nonce-1", "192.0.2.9", SeedSignature.answerChallenge(other, "nonce-1", "192.0.2.9")));
-        assertFalse(SeedSignature.checkChallenge(s, "nonce-1", "192.0.2.9", null));
+        assertFalse(SeedSignature.checkChallenge(s, "nonce-0001", "192.0.2.9", SeedSignature.answerChallenge(other, "nonce-0001", "192.0.2.9")));
+        assertFalse(SeedSignature.checkChallenge(s, "nonce-0001", "192.0.2.9", null));
+    }
+
+    @Test
+    public void testChallengeFormat() {
+        assertTrue(SeedSignature.isValidChallenge("AbCd_-0123456789"));
+        assertFalse(SeedSignature.isValidChallenge("short"));
+        assertFalse(SeedSignature.isValidChallenge("with|separator"));
+        assertTrue(SeedSignature.isValidObserved("192.0.2.9"));
+        assertTrue(SeedSignature.isValidObserved("2001:db8::1"));
+        assertTrue(SeedSignature.isValidObserved(SeedSignature.OBSERVED_SIDECAR));
+        assertFalse(SeedSignature.isValidObserved("192.0.2.9|x"));
     }
 
     @Test

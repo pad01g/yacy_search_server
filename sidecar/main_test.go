@@ -36,7 +36,7 @@ func TestYacyHandlerStripsClientAddressHeaders(t *testing.T) {
 	}))
 	defer backend.Close()
 	u, _ := url.Parse(backend.URL)
-	h := yacyHandler(u)
+	h := yacyHandler(u, "secret-token-0123456789")
 
 	req := httptest.NewRequest(http.MethodGet, "http://peer/yacy/hello.html", nil)
 	req.RemoteAddr = "12D3KooWExample"
@@ -55,6 +55,19 @@ func TestYacyHandlerStripsClientAddressHeaders(t *testing.T) {
 	}
 	if got.Get("X-YaCy-Libp2p-Peer") != "12D3KooWExample" {
 		t.Errorf("peer header missing: %v", got)
+	}
+	if got.Get("X-YaCy-Sidecar-Token") != "secret-token-0123456789" {
+		t.Errorf("token not passed to YaCy: %v", got)
+	}
+
+	// a request cannot remove the peer header by naming it in Connection, nor set its own
+	req2 := httptest.NewRequest(http.MethodGet, "http://peer/yacy/hello.html", nil)
+	req2.RemoteAddr = "12D3KooWExample"
+	req2.Header.Set("Connection", "X-YaCy-Libp2p-Peer, X-YaCy-Sidecar-Token")
+	req2.Header.Set("X-YaCy-Sidecar-Token", "forged")
+	h.ServeHTTP(httptest.NewRecorder(), req2)
+	if got.Get("X-YaCy-Libp2p-Peer") != "12D3KooWExample" || got.Get("X-YaCy-Sidecar-Token") != "secret-token-0123456789" {
+		t.Errorf("headers could be removed or forged: %v", got)
 	}
 
 	denied := httptest.NewRecorder()
@@ -104,9 +117,15 @@ func TestCircuitAddrsOnlyForThePeer(t *testing.T) {
 	good := "/ip4/172.30.0.3/tcp/4001/p2p/" + relayID + "/p2p-circuit/p2p/" + self
 	other := "/ip4/172.30.0.3/tcp/4001/p2p/" + relayID + "/p2p-circuit/p2p/" + relayID
 	direct := "/ip4/10.0.0.1/tcp/4001/p2p/" + self
-	got := circuitAddrs(id, good+"|"+other+"|"+direct+"|garbage")
+	relayPeer, _ := peer.Decode(relayID)
+	known := map[peer.ID]bool{relayPeer: true}
+	got := circuitAddrs(id, good+"|"+other+"|"+direct+"|garbage", known)
 	if len(got) != 1 || got[0].ID != id {
 		t.Fatalf("expected only the circuit address of the peer, got %v", got)
+	}
+	// a circuit through a relay we do not know (e.g. an internal host) is dropped
+	if got := circuitAddrs(id, good, map[peer.ID]bool{}); len(got) != 0 {
+		t.Fatalf("circuit through an unknown relay accepted: %v", got)
 	}
 }
 
@@ -115,6 +134,22 @@ func TestLimitedBody(t *testing.T) {
 	data, err := io.ReadAll(b)
 	if len(data) != 10 || err == nil {
 		t.Fatalf("expected 10 bytes and an error, got %d, %v", len(data), err)
+	}
+	exact := &limitedBody{ReadCloser: io.NopCloser(strings.NewReader(strings.Repeat("x", 10))), remaining: 10}
+	data, err = io.ReadAll(exact)
+	if len(data) != 10 || err != nil {
+		t.Fatalf("an answer of exactly the limit must end normally, got %d, %v", len(data), err)
+	}
+}
+
+func TestBrowserRequestsAreRecognized(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:1234/yacy/search.html", nil)
+	if isBrowserRequest(r) {
+		t.Fatal("a plain client request is not a browser request")
+	}
+	r.Header.Set("Sec-Fetch-Mode", "no-cors")
+	if !isBrowserRequest(r) {
+		t.Fatal("no-cors request of a web page not recognized")
 	}
 }
 

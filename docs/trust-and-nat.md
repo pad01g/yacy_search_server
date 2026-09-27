@@ -30,10 +30,12 @@ seed は `k=v` の集合で、受け取った側が IP・種別・フラグ・�
 |---|---|
 | `Hash`, `PK`（公開鍵 base64url）, `Name`, `Port`, `PortSSL`, `BDate`, `SigT`（署名時刻）, `Tags`（自己宣言タグ）, `Reach`, `P2PA`, `RDS`（§6） | `IP`, `IP6`, `PeerType`, `Flags`, 各種カウンタ, `LastSeen`, `news`, `TV`（§4） |
 
-- 署名 `Sig` = Ed25519(`"yacy-seed-v1\n"` + 中核項目をキー順に `k=v\n` で連結)。
+- 署名 `Sig` = Ed25519(`"yacy-seed-v1\n"` + `Hash=<hash>\n` + 残りの中核項目（値のあるもの）をキーの辞書順に `k=v\n` で連結)。
+  辞書順は `BDate, Name, P2PA, PK, Port, PortSSL, RDS, Reach, SigT, Tags`。
 - 受信時（`Seed.genRemoteSeed`）: `PK` があれば `Hash == H(PK)` と `Sig` を検証し、どちらか失敗なら **常に拒否**。
   `PK` が無い（旧実装の）seed は `trust.seed.acceptUnsigned=false`（既定）なら拒否。
-- 自分の seed は送るたびに（中核が変わっていれば）署名し直す。
+- 自分の seed は送るたびに、中核が変わったか前の署名から 7 日経っていれば署名し直す。
+- 30 日より古い `SigT` の seed は、まだ署名付きで知らないピアのものなら受け入れない（古い seed の再送対策）。
 
 ### 2.2 hello のチャレンジ
 
@@ -107,9 +109,12 @@ payload の種類:
 ## 4. 一覧の配り方
 
 - 各ピアは受け取った封筒を検証して `DATA/SETTINGS/trust-bundle.json` に保存し、`/yacy/trust.json` で公開する（誰が中継してもよい）。
-- seed に `TV`（信頼しているコーディネータごとの「保持している一覧の最大バージョン」）を載せる。形式は `<コーディネータ鍵のハッシュ先頭 8 文字>.<版>|…`。
-- peer ping のたびに、接続中の seed の `TV` が自分より新しければ、そのピアの `/yacy/trust.json` を取りに行って検証・統合する。
-- 起動時と 10 分ごとに `trust.bundle.urls`（seed の配布先と同じ場所を想定）からも取得する。
+- seed に `TV` を載せる。信頼しているコーディネータごとに、保持している封筒の版の **合計**（そのコーディネータの委任書すべての版 +
+  自身と委任先オペレータの一覧の版。失効したオペレータの分も数える）。形式は `<コーディネータのピア hash 先頭 8 文字>.<合計>|…`。
+  どの封筒が新しくなっても合計は増え、失効でも減らない。
+- peer ping のたびに、接続中の seed の `TV` が自分より大きければ、そのピアの `/yacy/trust.json` を取りに行って検証・統合する。
+  `TV` は署名対象外なので、問い合わせ先は乱数順に選び、何も得られなかったピアには 10 分間問い合わせない。
+- 起動時と 10 分ごと（`trust.bundle.urls` が変わったときはすぐ）に、`trust.bundle.urls`（seed の配布先と同じ場所を想定）からも取得する。
 - 古い版を掴まされる攻撃は、複数の経路（接続中のピアの `TV`）で最新版の存在を知ることで緩和する。
 
 ## 5. 文書の出所（作者の署名）
@@ -151,19 +156,25 @@ payload の種類:
 ```
 
 - **sidecar**（`sidecar/`, Go, go-libp2p）: YaCy と同じ鍵で libp2p ホストを立てる。AutoNAT で到達性を判定し、届かなければ設定されたリレーに予約（circuit relay v2）し、DCUtR で直結を試みる。
-  - `127.0.0.1:8095/p2p/<libp2p ピア ID>/<path>`: 相手の sidecar へ libp2p ストリーム（`/yacy/http/1.0.0`）を開き、HTTP 要求をそのまま運ぶ。
+  - トンネル: YaCy が制御 API に `GET /tunnel/<libp2p ピア ID>?addrs=<回線アドレス>` を送ると、sidecar はその相手専用の
+    ローカルのポートを開いて `{"port": n}` を返す。`127.0.0.1:n` への普通の HTTP 要求は、相手の sidecar への libp2p ストリーム
+    （`/yacy/http/1.0.0`）で運ばれる（必要ならリレー経由）。ホスト:ポートの形なので、YaCy の既存のクライアント（プロトコル、Solr）は
+    そのまま使える。YaCy はトンネルを 5 分ごとに聞き直す。
   - 受け側は `/yacy/*.html|json|xml` と Solr の select だけを、YaCy の **sidecar 用の接続口**（`127.0.0.1:8096`,
     `p2p.sidecar.yacyPort`）へ転送する。管理画面 `*_p` は通さない。送信元を名乗るヘッダー（`X-Real-IP`, `Forwarded`,
     `X-Forwarded-*`）は取り除く。
+  - sidecar 用の接続口は `p2p.sidecar.url` が設定されているときだけ、YaCy の起動時に開く（設定を変えたら再起動が要る）。
+    `p2p.sidecar.yacyPort` は sidecar の `-yacy` と同じポートにする。sidecar は要求ごとにトークンと相手のピア ID のヘッダーを付け、
+    接続口はトークンが合うときだけピア ID を信じる（合わなければピア ID のヘッダーを捨てる。トークンは YaCy の中へは渡さない）。
   - sidecar 用の接続口では、要求の送信元アドレスを「libp2p のピア ID から作った 2001:db8::/32 のアドレス」に置き換える。
     ループバックから来る要求に YaCy が与える特権（管理者扱い、負荷制限の免除、`X-Real-IP` の信用）を付けず、負荷制限を
     ピアごとに効かせるため。hello は、そのピア ID が seed の鍵のものであり、seed が `Reach=relay` であることを確かめる。
   - 制御 API（`/status`, `/tunnel`）は、YaCy が `DATA/SETTINGS/sidecar.token` に書いたトークンを要求し、Host がループバック
     であること、Web ページからの要求（`Origin`）でないことを確かめる（他のローカルのプロセスや DNS rebinding 対策）。
     YaCy は `/status` のピア ID が自分の鍵のものかを確かめ、`boot` が変わったら（sidecar の再起動）トンネルの記憶を捨てる。
-  - トンネルは最大 256 本で、15 分使われなければ閉じる。相手ごとの同時要求は 8 本まで、1 要求 60 秒・応答 32 MiB まで。
+  - トンネルは最大 256 本で、15 分使われなければ閉じる。相手ごとの同時要求は 8 本まで、1 要求 60 秒・要求 / 応答とも 32 MiB まで。
   - `/status`: libp2p ピア ID、到達性、リレー経由のアドレス。YaCy が peer ping ごとに読む。
-  - `-relay-service`: リレーとして動く。1 回線あたりの上限を 16 MiB / 10 分に広げる（既定の 128 KiB / 2 分では検索応答に足りない。
+  - `-relay-service`: リレーとして動く。1 回線あたりの上限を 128 MiB / 30 分に広げる（既定の 128 KiB / 2 分では検索応答に足りない。
     YaCy の要求は毎回新しいストリームなので、上限に達した回線は開き直せばよい）。`-relay-allow` で使えるピア ID を限れる。
     `-key-create` で鍵を保存し、再起動しても同じピア ID で動く。
   - AutoNAT は公開アドレスしか検査しないので、私設アドレスだけの環境では判定が出ない。sidecar は「public」と判定されていない間は
@@ -174,7 +185,7 @@ payload の種類:
     junior と報告されたとき、seed を `Reach=relay`、`P2PA=<回線アドレス>` にする。一度切り替えたら AutoNAT が「public」と
     判定するまで保つ。`leecher` は `Reach=none`（外から受けない。今の junior と同じ役）。
   - トンネルを開くとき、相手の seed の `P2PA` のうち「相手自身の ID で終わる回線アドレス」だけを sidecar に渡す。
-  - 相手の seed が `Reach=relay` で、自分に sidecar があれば、その相手への URL を `http://127.0.0.1:8095/p2p/<id>` にする（`Seed.getPublicURL`）。hello の back-ping もこの経路を通るので、リレー越しに到達できれば senior になる。
+  - 相手の seed が署名付きの `Reach=relay` で、自分に sidecar があれば、その相手への URL をトンネルの `http://127.0.0.1:<port>` にする（`Seed.getPublicURL`）。hello の back-ping もこの経路を通るので、リレー越しに到達できれば senior になる。
   - **役割:** `Reach=relay` のピアは既定で「自分の索引への問い合わせに応答するだけ」。DHT の保存先（索引の預け先・DHT 検索先）にはしない。本人が `p2p.relay.dhtStorage=true` を宣言したら（seed の `RDS=1`）保存先にも入れる。宣言の真偽は確かめられないのでオプション扱い。
 - リレーのアドレスはブートストラップで配る（seed 一覧と同じ場所）。
 
@@ -193,7 +204,11 @@ payload の種類:
 | `p2p.sidecar.yacyPort` | `8096` | sidecar が他ピアの要求を YaCy へ渡すループバックの口 |
 | `p2p.mode` | `auto` | `auto` / `direct` / `leecher` |
 | `p2p.relay.dhtStorage` | `false` | リレー経由でも DHT の保存先になる |
-| `remotesearch.maxtime` | `5000` | 他ピアの応答を待つ時間（ms）。10000 で頭打ち |
+| `remotesearch.maxtime` | `5000` | 他ピアの応答を待つ時間（ms）。10000 で頭打ち。届いた順に表示する |
+| `remotesearch.dht.minage` | `3` | DHT 検索先にする最低の稼働日数（小さな網・実験では `0`） |
+
+設定ではなく自動で作られるファイル: `DATA/SETTINGS/peer.key`（鍵）、`DATA/SETTINGS/trust-bundle.json`（一覧の束）、
+`DATA/SETTINGS/sidecar.token`（制御 API のトークン）。
 
 **開放モード**（旧網の索引を使う）= `trust.seed.acceptUnsigned=true` + `trust.search.acceptUnverified=true`。
 未検証の結果は検証済みの後ろに並べ、`yacysearch.json` の各結果に `verified`・`trust`・`trustTags` を付ける。
@@ -231,7 +246,7 @@ compose で次の構成を立てる（`compose.trust.yaml`）。
 2. 既定では `spam.lab` の結果が 0 件。開放モードでは出るが `verified=false` で、信頼済みの結果より下。
 3. `ads.lab` の結果に `ads` タグが付く。`excludeTags=ads` で消える。
 4. 作者を偽った文書は、開放モードでも出ない（`INVALID`）。
-5. `nat-1` は `Reach=relay` になり、`fork-1` の global 検索で `delta.lab` の頁が見つかる。`nat-1` の sidecar を止めると見つからない。`nat-1` は DHT の保存先に選ばれない。
+5. `nat-1` は `Reach=relay` になり、`fork-1` の global 検索で `delta.lab` の頁が見つかる。公開側から `nat-1` へは直接届かない。`nat-1` は DHT の保存先に選ばれない。
 6. 一覧を v2（`fork-3` を外す）にし、`fork-2` にだけ渡す。`fork-1` が `TV` の交換で v2 を取り込み、`fork-3` の結果が消える。
 7. オペレータの委任を失効させると、その一覧のピアの結果が消える。
 
@@ -246,4 +261,5 @@ compose で次の構成を立てる（`compose.trust.yaml`）。
 - `P2PA` は同じリレーを知っていることが前提。別のリレーに予約したピアへは、その回線アドレスを経由してつなぐ。
 - 信頼された作者が虚偽の内容に署名することは防げない（タグと監査で扱う）。
 - 保存ピアが結果を返さない攻撃は防げない（冗長化で薄める）。
-- 自ピアの既存の索引は署名が無い。署名付きにするには再索引が要る。
+- 自ピアの既存の索引は署名が無い。署名付きにするには再索引が要る。既存の Solr の索引には `provenance_s` の欄が無いので、
+  `solr.collection.schema` に欄を足す（新規の導入では既定で入る）。

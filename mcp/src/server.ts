@@ -124,7 +124,7 @@ export function createServer(yacy: YaCy): McpServer {
         const limit = Number((await yacy.getSettings(["50_localcrawl_loadprereq"]))["50_localcrawl_loadprereq"]);
         const load = Number(index.loadAverage);
         if (Number(index.localCrawlerQueue) > 0 && load > limit)
-          crawlerPaused = `The crawler waits: the system load average ${load} is above 50_localcrawl_loadprereq=${limit}. Wait for the machine to be less busy, or raise the limit in the YaCy admin pages (ConfigProperties_p.html).`;
+          crawlerPaused = `The crawler waits: the system load average ${load} is above 50_localcrawl_loadprereq=${limit}. Wait for the machine to be less busy, or raise the limit in ConfigProperties_p.html and restart the peer (YaCy reads it only at start).`;
       } catch (e) {
         index = (e as Error).message;
       }

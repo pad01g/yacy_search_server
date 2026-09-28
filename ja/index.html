@@ -6,6 +6,7 @@
 <title>YaCy improved-search</title>
 <meta name="description" content="YaCy の実験的なフォーク。順位付けの改善、日本語・中国語の検索、ピアと文書の署名、コーディネータの信頼の一覧、libp2p のリレーによる NAT 越えを、docker compose で再現できる閉じた網で測った。">
 <link rel="alternate" hreflang="en" href="../">
+<link rel="describedby" type="text/markdown" href="../llms.txt">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
@@ -125,6 +126,15 @@ docker compose -f compose.demo.yaml -p yacydemo up -d
 </figure>
 <p>画面では信頼の設定も変えられる。問い合わせ元が信頼するコーディネータを選ぶ（もう 1 つのコーディネータの一覧はスパムのピアだけで、それも信頼するとスパムが「検証済み」になる）。信頼の一覧を編集して署名し直す。新しい版を 1 つのピアにだけ渡して広がるのを見る。オペレータへの委任を失効させる、し直す。</p>
 <p>実験そのもの: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code>（検索品質）、<code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code>（信頼と NAT 越え）。詳しくは <a href="https://github.com/pad01g/yacy-lab#readme">yacy-lab の README</a>。</p>
+
+<h2 id="agents">AI エージェント向け</h2>
+<p>エージェントは自分のピアを動かし、検索 API も API キーも無しに検索の道具として使える。</p>
+<ul>
+  <li><strong>MCP サーバー</strong>（<code>io.github.pad01g/yacy-search</code>）: <code>docker run -i --rm -e YACY_URL=http://host.docker.internal:8090 -e YACY_ADMIN_PASSWORD=yacy ghcr.io/pad01g/yacy-search-mcp:0.1.0</code>。tool は <code>search</code>、<code>crawl</code>、<code>index_status</code>、<code>peers</code>、<code>get_ranking_settings</code>、<code>set_ranking_setting</code>、<code>evaluate_ranking</code>、<code>trust_status</code>。エージェントの横で動き、エージェント自身のピアに問い合わせる。中央のサービスは無い。</li>
+  <li><strong>スキル</strong>: <code>npx skills add pad01g/yacy-lab</code> で <a href="https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md">yacy-p2p-search</a> が入る（ピアの起動、crawl、検索、順位の評価と調整）。</li>
+  <li><strong>信頼の登録簿</strong>: <a href="https://github.com/pad01g/yacy-trust">pad01g/yacy-trust</a>。pull request がマージされると、ピアが一覧に載る、またはピアを保証するオペレータになれる。</li>
+  <li>機械向けの要約: <a href="../llms.txt">llms.txt</a>。</li>
+</ul>
 
 <h2 id="limits">限界</h2>
 <ul>

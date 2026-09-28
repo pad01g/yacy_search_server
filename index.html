@@ -6,6 +6,7 @@
 <title>YaCy improved-search</title>
 <meta name="description" content="An experimental YaCy fork: stricter and fairer ranking, CJK search, signed peers and documents, coordinator trust lists and NAT traversal through a libp2p relay, measured in reproducible docker compose networks.">
 <link rel="alternate" hreflang="ja" href="ja/">
+<link rel="describedby" type="text/markdown" href="llms.txt">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -125,6 +126,15 @@ docker compose -f compose.demo.yaml -p yacydemo up -d
 </figure>
 <p>The page also lets you change trust: choose which coordinators the searching peer trusts (a second coordinator lists only the spam peer, so trusting it makes the spam "verified"), edit and re-sign the trust list, hand the new version to one peer and watch it spread, and revoke or restore the operator's delegation.</p>
 <p>The experiments themselves: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code> (search quality) and <code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code> (trust and NAT). See the <a href="https://github.com/pad01g/yacy-lab#readme">lab README</a>.</p>
+
+<h2 id="agents">For AI agents</h2>
+<p>An agent can run its own peer and use it as a search tool, without a search API or API key:</p>
+<ul>
+  <li><strong>MCP server</strong> (<code>io.github.pad01g/yacy-search</code>): <code>docker run -i --rm -e YACY_URL=http://host.docker.internal:8090 -e YACY_ADMIN_PASSWORD=yacy ghcr.io/pad01g/yacy-search-mcp:0.1.0</code>. Tools: <code>search</code>, <code>crawl</code>, <code>index_status</code>, <code>peers</code>, <code>get_ranking_settings</code>, <code>set_ranking_setting</code>, <code>evaluate_ranking</code>, <code>trust_status</code>. It runs next to the agent and talks to the agent's own peer; there is no central service.</li>
+  <li><strong>Agent skill</strong>: <code>npx skills add pad01g/yacy-lab</code> installs <a href="https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md">yacy-p2p-search</a> (start a peer, crawl, search, evaluate and tune ranking).</li>
+  <li><strong>Trust registry</strong>: <a href="https://github.com/pad01g/yacy-trust">pad01g/yacy-trust</a>. A merged pull request lists your peer or makes you an operator who vouches for peers.</li>
+  <li>Machine-readable summary: <a href="llms.txt">llms.txt</a>.</li>
+</ul>
 
 <h2 id="limits">Limits</h2>
 <ul>

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pad01g/yacy-search",
+  "title": "YaCy peer-to-peer search",
+  "description": "Web search, crawling and ranking evaluation on your own YaCy peer: no API key, no central service.",
+  "version": "0.1.0",
+  "websiteUrl": "https://pad01g.github.io/yacy_search_server/",
+  "repository": {
+    "url": "https://github.com/pad01g/yacy_search_server",
+    "source": "github",
+    "subfolder": "mcp"
+  },
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/pad01g/yacy-search-mcp:0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "YACY_URL",
+          "description": "Base URL of your YaCy peer as seen from the MCP server container, e.g. http://host.docker.internal:8090",
+          "default": "http://localhost:8090"
+        },
+        {
+          "name": "YACY_ADMIN_USER",
+          "description": "YaCy administrator account, needed for crawling and settings",
+          "default": "admin"
+        },
+        {
+          "name": "YACY_ADMIN_PASSWORD",
+          "description": "YaCy administrator password; without it only search, peers and trust_status work",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

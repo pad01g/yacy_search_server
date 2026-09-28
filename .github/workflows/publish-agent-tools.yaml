@@ -1,0 +1,122 @@
+name: Publish images and MCP server
+
+# Images of this fork on ghcr.io, so that people and agents can run a peer without building it:
+#   ghcr.io/pad01g/yacy-improved-search  the YaCy fork (docker/Dockerfile)
+#   ghcr.io/pad01g/yacy-sidecar          the libp2p sidecar for NAT traversal (sidecar/)
+#   ghcr.io/pad01g/yacy-search-mcp       the MCP server (mcp/)
+# A tag mcp-v<version> also publishes mcp/server.json to the MCP registry (registry.modelcontextprotocol.io).
+
+on:
+  push:
+    tags: ["mcp-v*"]
+  workflow_dispatch:
+    inputs:
+      publish_registry:
+        description: "also publish mcp/server.json to the MCP registry"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test-mcp:
+    if: github.repository == 'pad01g/yacy_search_server'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: server.json and package.json agree on the version
+        run: |
+          v=$(jq -r .version package.json)
+          test "$(jq -r .version server.json)" = "$v"
+          jq -e --arg v "$v" '.packages[0].identifier | endswith(":" + $v)' server.json
+
+  images:
+    needs: test-mcp
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: yacy-improved-search
+            context: .
+            file: docker/Dockerfile
+            description: "YaCy peer-to-peer search engine, improved-search fork: stricter ranking, CJK search, signed peers and documents, trust lists, NAT traversal"
+          - image: yacy-sidecar
+            context: sidecar
+            file: sidecar/Dockerfile
+            description: "libp2p sidecar that lets a YaCy peer behind a NAT answer searches through a circuit relay"
+          - image: yacy-search-mcp
+            context: mcp
+            file: mcp/Dockerfile
+            description: "MCP server for a YaCy peer: peer-to-peer web search, crawling, ranking settings and search quality evaluation"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Version
+        id: version
+        run: |
+          if [ "${{ matrix.image }}" = "yacy-search-mcp" ]; then echo "tag=$(jq -r .version mcp/package.json)" >> "$GITHUB_OUTPUT"; else echo "tag=" >> "$GITHUB_OUTPUT"; fi
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/pad01g/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+            type=raw,value=${{ steps.version.outputs.tag }},enable=${{ steps.version.outputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/pad01g/yacy_search_server
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=GPL-2.0-or-later
+          annotations: |
+            org.opencontainers.image.source=https://github.com/pad01g/yacy_search_server
+            org.opencontainers.image.description=${{ matrix.description }}
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: false
+
+  mcp-registry:
+    needs: images
+    if: startsWith(github.ref, 'refs/tags/mcp-v') || inputs.publish_registry
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+      - name: Log in with the GitHub OIDC token (namespace io.github.pad01g)
+        run: ./mcp-publisher login github-oidc
+      - name: Publish mcp/server.json
+        working-directory: mcp
+        run: ../mcp-publisher publish

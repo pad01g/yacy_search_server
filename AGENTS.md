@@ -1,5 +1,15 @@
 # Repository Instructions
 
+## Using This Project From An Agent
+
+If you want to *use* this search engine rather than change it: start a peer with
+`docker run -d --name yacy -p 127.0.0.1:8090:8090 -v yacy_data:/opt/yacy_search_server/DATA ghcr.io/pad01g/yacy-improved-search:latest`
+and connect the MCP server in `mcp/` (image `ghcr.io/pad01g/yacy-search-mcp`, registry name `io.github.pad01g/yacy-search`).
+Step-by-step instructions for agents: https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md.
+Overview for machines: https://pad01g.github.io/yacy_search_server/llms.txt. Trust registry (join by pull request):
+https://github.com/pad01g/yacy-trust. The sections below are for changing the code.
+
+
 ## Web UI, API, Help, And Localization
 
 When changing YaCy web pages or API endpoints, update all matching user-facing and tool-facing artifacts in the same change.

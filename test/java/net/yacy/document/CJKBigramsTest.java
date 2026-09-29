@@ -89,4 +89,13 @@ public class CJKBigramsTest {
         assertEquals(3, CJKBigrams.wordCount("ステーブル"));
         assertEquals(2, CJKBigrams.wordCount("abc金"));
     }
+
+    @Test
+    public void testSplitIgnoresSurrogatesAndFoldsWidth() {
+        // supplementary characters are separators, as in the index
+        assertEquals(Arrays.asList("ラー", "ーメ", "メン"), CJKBigrams.split("ラーメン\uD83C\uDF5C"));
+        assertEquals(Arrays.asList("野家"), CJKBigrams.split("\uD842\uDFB7野家"));
+        // half-width katakana is folded to full width, like Solr's CJKWidthFilter
+        assertEquals(Arrays.asList("カタ", "タカ", "カナ"), CJKBigrams.split("ｶﾀｶﾅ"));
+    }
 }

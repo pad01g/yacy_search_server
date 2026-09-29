@@ -25,7 +25,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -83,6 +82,7 @@ public final class P2PRoute {
     /** read or create the token of the sidecar control API */
     public static void initToken(final File file) throws IOException {
         if (file.exists()) {
+            Ed25519.restrictToOwner(file);
             token = new String(Files.readAllBytes(file.toPath()), StandardCharsets.US_ASCII).trim();
             if (!token.isEmpty()) return;
         }
@@ -91,12 +91,7 @@ public final class P2PRoute {
         token = Ed25519.encode(b);
         final File dir = file.getAbsoluteFile().getParentFile();
         if (dir != null) dir.mkdirs();
-        Files.write(file.toPath(), token.getBytes(StandardCharsets.US_ASCII));
-        try {
-            Files.setPosixFilePermissions(file.toPath(), PosixFilePermissions.fromString("rw-------"));
-        } catch (final UnsupportedOperationException | IOException e) {
-            // not a POSIX file system
-        }
+        Ed25519.writePrivateFile(file, token.getBytes(StandardCharsets.US_ASCII));
     }
 
     static String token() {
@@ -148,6 +143,13 @@ public final class P2PRoute {
             final Tunnel old = tunnels.put(peerId, new Tunnel(port));
             if (old != null && old.port != port) tunnelPorts.remove(old.port);
             tunnelPorts.add(port);
+            // tunnels to many peers: forget the ones not asked for within the TTL (the sidecar closed them anyway)
+            if (tunnels.size() > 512) {
+                final long now = System.currentTimeMillis();
+                tunnels.entrySet().removeIf(t -> now - t.getValue().time > TUNNEL_TTL);
+                tunnelPorts.clear();
+                for (final Tunnel t : tunnels.values()) tunnelPorts.add(t.port);
+            }
             failures.remove(peerId);
             return port;
         } catch (final Exception e) {

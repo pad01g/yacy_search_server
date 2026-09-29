@@ -3,7 +3,7 @@
   "name": "io.github.pad01g/yacy-search",
   "title": "YaCy peer-to-peer search",
   "description": "Web search, crawling and ranking evaluation on your own YaCy peer: no API key, no central service.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "websiteUrl": "https://pad01g.github.io/yacy_search_server/",
   "repository": {
     "url": "https://github.com/pad01g/yacy_search_server",
@@ -13,15 +13,15 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/pad01g/yacy-search-mcp:0.1.0",
+      "identifier": "ghcr.io/pad01g/yacy-search-mcp:0.2.0",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "YACY_URL",
-          "description": "Base URL of your YaCy peer as seen from the MCP server container, e.g. http://host.docker.internal:8090",
-          "default": "http://localhost:8090"
+          "description": "Base URL of your YaCy peer as seen from the MCP server container, e.g. http://yacy:8090 on a shared Docker network (docker run --network ...), or http://host.docker.internal:8090",
+          "isRequired": true
         },
         {
           "name": "YACY_ADMIN_USER",
@@ -30,8 +30,16 @@
         },
         {
           "name": "YACY_ADMIN_PASSWORD",
-          "description": "YaCy administrator password; without it only search, peers and trust_status work",
+          "description": "YaCy administrator password; without it crawl, settings and the index counts of index_status are not available",
           "isSecret": true
+        },
+        {
+          "name": "YACY_CRAWL_ALLOW_PRIVATE",
+          "description": "1 lets crawl reach loopback and private addresses (intranets); off by default"
+        },
+        {
+          "name": "YACY_ALLOW_TRUST_SETTINGS",
+          "description": "1 lets set_ranking_setting change the trust filter settings (acceptUnverified, excludeTags); off by default"
         }
       ]
     }

@@ -66,9 +66,20 @@ public final class SeedSignature {
         return sb.toString();
     }
 
-    /** @return a string that changes whenever the result of {@link #verify(Seed)} can change */
+    /**
+     * @return a short key that changes whenever the result of {@link #verify(Seed)} can change: a hash, so that the
+     *         cache holds little memory even for large seeds
+     */
     public static String cacheKey(final Seed seed) {
-        return canonical(seed) + seed.get(Seed.SIG, "");
+        try {
+            final java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            md.update(canonical(seed).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            md.update((byte) 0);
+            md.update(seed.get(Seed.SIG, "").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return Ed25519.encode(md.digest());
+        } catch (final java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /**
@@ -107,7 +118,8 @@ public final class SeedSignature {
         final Status cached = verified.get(key);
         if (cached != null) return cached;
         final Status status = verify(seed);
-        verified.put(key, status);
+        // invalid seeds are not cached: anybody can produce any number of them
+        if (status != Status.INVALID) verified.put(key, status);
         return status;
     }
 
@@ -116,6 +128,10 @@ public final class SeedSignature {
         final String sig = seed.get(Seed.SIG, null);
         if (pk == null && sig == null) return Status.UNSIGNED;
         if (pk == null || sig == null) return Status.INVALID;
+        // the canonical form separates fields by newlines: a signed value with a control character could be read as
+        // several fields (e.g. PortSSL="8443\nReach=relay" after the real Reach field is removed)
+        for (final String key : CORE) if (hasControl(seed.get(key, null))) return Status.INVALID;
+        if (hasControl(seed.hash)) return Status.INVALID;
         final String expectedHash = PeerIdentity.peerHashOf(pk);
         if (expectedHash == null || !expectedHash.equals(seed.hash)) return Status.INVALID;
         return Ed25519.verify(pk, canonical(seed), sig) ? Status.VALID : Status.INVALID;
@@ -154,6 +170,12 @@ public final class SeedSignature {
         if (observed == null) return false;
         if (OBSERVED_SIDECAR.equals(observed)) return true;
         return com.google.common.net.InetAddresses.isInetAddress(observed.replace("[", "").replace("]", ""));
+    }
+
+    private static boolean hasControl(final String v) {
+        if (v == null) return false;
+        for (int i = 0; i < v.length(); i++) if (v.charAt(i) < 0x20 || v.charAt(i) == 0x7f) return true;
+        return false;
     }
 
     /** multiaddrs and tags travel in seed fields: they must not contain the separators of the seed format */

@@ -2,13 +2,16 @@ package main
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 func TestAllowedPath(t *testing.T) {
@@ -79,7 +82,7 @@ func TestYacyHandlerStripsClientAddressHeaders(t *testing.T) {
 
 func TestGuardProtectsControlAPI(t *testing.T) {
 	s := &sidecar{token: "0123456789abcdef-token"}
-	h := s.guard("127.0.0.1:8095", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := s.guard("127.0.0.1:8095", true, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	cases := []struct {
 		name, host, token, origin string
 		want                      int
@@ -118,14 +121,21 @@ func TestCircuitAddrsOnlyForThePeer(t *testing.T) {
 	other := "/ip4/172.30.0.3/tcp/4001/p2p/" + relayID + "/p2p-circuit/p2p/" + relayID
 	direct := "/ip4/10.0.0.1/tcp/4001/p2p/" + self
 	relayPeer, _ := peer.Decode(relayID)
-	known := map[peer.ID]bool{relayPeer: true}
+	relayAddr, _ := ma.NewMultiaddr("/ip4/172.30.0.3/tcp/4001")
+	known := map[peer.ID]peer.AddrInfo{relayPeer: {ID: relayPeer, Addrs: []ma.Multiaddr{relayAddr}}}
 	got := circuitAddrs(id, good+"|"+other+"|"+direct+"|garbage", known)
 	if len(got) != 1 || got[0].ID != id {
 		t.Fatalf("expected only the circuit address of the peer, got %v", got)
 	}
 	// a circuit through a relay we do not know (e.g. an internal host) is dropped
-	if got := circuitAddrs(id, good, map[peer.ID]bool{}); len(got) != 0 {
+	if got := circuitAddrs(id, good, map[peer.ID]peer.AddrInfo{}); len(got) != 0 {
 		t.Fatalf("circuit through an unknown relay accepted: %v", got)
+	}
+	// a known relay id with a hostile transport part: the address is rebuilt from the relay's own address
+	hostile := "/ip4/169.254.169.254/tcp/80/p2p/" + relayID + "/p2p-circuit/p2p/" + self
+	got = circuitAddrs(id, hostile, known)
+	if len(got) != 1 || len(got[0].Addrs) != 1 || !strings.HasPrefix(got[0].Addrs[0].String(), "/ip4/172.30.0.3/tcp/4001/") {
+		t.Fatalf("hostile transport address was not replaced: %v", got)
 	}
 }
 
@@ -179,4 +189,40 @@ func TestLimitPerPeer(t *testing.T) {
 		t.Errorf("expected 429 for the extra request, got %d", rec.Code)
 	}
 	close(release)
+}
+
+func TestRetiredTunnelsAreBounded(t *testing.T) {
+	s := &sidecar{tunnels: map[peer.ID]*tunnelEntry{}}
+	for i := 0; i < maxRetired+10; i++ {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.retireLocked(&tunnelEntry{port: l.Addr().(*net.TCPAddr).Port, listener: l})
+	}
+	if len(s.retired) != maxRetired {
+		t.Fatalf("retired tunnels: %d, want %d", len(s.retired), maxRetired)
+	}
+	for _, r := range s.retired {
+		r.listener.Close()
+	}
+}
+
+func TestStatusIsSignedWithThePeerKey(t *testing.T) {
+	priv, pub, err := crypto.GenerateEd25519Key(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := statusMessage("n0nce", "12D3KooWPeer", "boot1")
+	sig, err := priv.Sign([]byte(msg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := pub.Verify([]byte(msg), sig)
+	if err != nil || !ok {
+		t.Fatalf("signature does not verify: %v", err)
+	}
+	if statusMessage("other", "12D3KooWPeer", "boot1") == msg {
+		t.Fatal("the nonce is not part of the message")
+	}
 }

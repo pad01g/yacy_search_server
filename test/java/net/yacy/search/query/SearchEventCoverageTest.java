@@ -81,7 +81,8 @@ public class SearchEventCoverageTest {
         assertEquals(0.2d, SearchEvent.thinWeight(4, 100, 0.5d), 1e-9);
         // floor, unknown count, switched off
         assertEquals(0.1d, SearchEvent.thinWeight(1, 100, 1.0d), 0.0d);
-        assertEquals(1.0d, SearchEvent.thinWeight(0, 100, 1.0d), 0.0d);
+        assertEquals(0.1d, SearchEvent.thinWeight(0, 100, 1.0d), 0.0d);
+        assertEquals(1.0d, SearchEvent.thinWeight(-1, 100, 1.0d), 0.0d);
         assertEquals(1.0d, SearchEvent.thinWeight(10, 0, 1.0d), 0.0d);
         assertEquals(1.0d, SearchEvent.thinWeight(10, 100, 0.0d), 0.0d);
     }

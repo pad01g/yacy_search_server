@@ -4,44 +4,65 @@ name: Publish images and MCP server
 #   ghcr.io/pad01g/yacy-improved-search  the YaCy fork (docker/Dockerfile)
 #   ghcr.io/pad01g/yacy-sidecar          the libp2p sidecar for NAT traversal (sidecar/)
 #   ghcr.io/pad01g/yacy-search-mcp       the MCP server (mcp/)
-# A tag mcp-v<version> also publishes mcp/server.json to the MCP registry (registry.modelcontextprotocol.io).
+# A tag mcp-v<version> (the version of mcp/package.json) also pushes the MCP image as :<version> and publishes
+# mcp/server.json to the MCP registry. A manual run only updates :latest and :sha-<commit>.
+# Only commits on the default branch are published.
 
 on:
   push:
     tags: ["mcp-v*"]
   workflow_dispatch:
-    inputs:
-      publish_registry:
-        description: "also publish mcp/server.json to the MCP registry"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 jobs:
-  test-mcp:
+  check:
     if: github.repository == 'pad01g/yacy_search_server'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
     defaults:
       run:
         working-directory: mcp
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: The commit is on the default branch
+        run: |
+          git fetch -q origin "${{ github.event.repository.default_branch }}"
+          git merge-base --is-ancestor "$GITHUB_SHA" "origin/${{ github.event.repository.default_branch }}" \
+            || { echo "::error::$GITHUB_SHA is not on the default branch"; exit 1; }
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - name: server.json and package.json agree on the version
+      - name: Versions agree
+        id: version
         run: |
           v=$(jq -r .version package.json)
           test "$(jq -r .version server.json)" = "$v"
           jq -e --arg v "$v" '.packages[0].identifier | endswith(":" + $v)' server.json
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            test "$GITHUB_REF_NAME" = "mcp-v$v" || { echo "::error::tag $GITHUB_REF_NAME does not match mcp/package.json version $v"; exit 1; }
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: A released version is never overwritten
+        if: steps.version.outputs.release == 'true'
+        run: |
+          if docker manifest inspect "ghcr.io/pad01g/yacy-search-mcp:${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "::error::ghcr.io/pad01g/yacy-search-mcp:${{ steps.version.outputs.version }} exists already; raise the version"; exit 1
+          fi
 
   images:
-    needs: test-mcp
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -63,26 +84,22 @@ jobs:
             file: mcp/Dockerfile
             description: "MCP server for a YaCy peer: peer-to-peer web search, crawling, ranking settings and search quality evaluation"
     steps:
-      - uses: actions/checkout@v5
-      - name: Version
-        id: version
-        run: |
-          if [ "${{ matrix.image }}" = "yacy-search-mcp" ]; then echo "tag=$(jq -r .version mcp/package.json)" >> "$GITHUB_OUTPUT"; else echo "tag=" >> "$GITHUB_OUTPUT"; fi
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/pad01g/${{ matrix.image }}
           tags: |
             type=raw,value=latest
             type=sha,format=short
-            type=raw,value=${{ steps.version.outputs.tag }},enable=${{ steps.version.outputs.tag != '' }}
+            type=raw,value=${{ needs.check.outputs.version }},enable=${{ matrix.image == 'yacy-search-mcp' && needs.check.outputs.release == 'true' }}
           labels: |
             org.opencontainers.image.source=https://github.com/pad01g/yacy_search_server
             org.opencontainers.image.description=${{ matrix.description }}
@@ -92,7 +109,7 @@ jobs:
             org.opencontainers.image.description=${{ matrix.description }}
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -104,17 +121,22 @@ jobs:
           provenance: false
 
   mcp-registry:
-    needs: images
-    if: startsWith(github.ref, 'refs/tags/mcp-v') || inputs.publish_registry
+    needs: [check, images]
+    if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
+    env:
+      PUBLISHER_URL: https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
+      PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
     steps:
-      - uses: actions/checkout@v5
-      - name: Install mcp-publisher
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Install mcp-publisher (pinned, checksum verified)
         run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          curl -fsSL -o mcp-publisher.tar.gz "$PUBLISHER_URL"
+          echo "$PUBLISHER_SHA256  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
       - name: Log in with the GitHub OIDC token (namespace io.github.pad01g)
         run: ./mcp-publisher login github-oidc
       - name: Publish mcp/server.json

@@ -212,6 +212,27 @@ public class TrustStoreTest {
     }
 
     @Test
+    public void testVersionsFarInTheFutureAreRejected() throws Exception {
+        add(delegation(this.coordinator, this.operator, 1, false));
+        final long tomorrowAndMore = System.currentTimeMillis() / 1000 + 2 * 86400;
+        add(list(this.operator, tomorrowAndMore, new Object[][] {{this.peerA, 100}}));
+        assertTrue(this.store.effective().isEmpty());
+        add(list(this.operator, System.currentTimeMillis() / 1000, new Object[][] {{this.peerA, 100}}));
+        assertEquals(1, this.store.effective().size());
+    }
+
+    @Test
+    public void testRevocationReachesPeersWithHighOperatorListVersions() throws Exception {
+        // this store holds an operator list with a large version
+        add(delegation(this.coordinator, this.operator, 1, false));
+        add(list(this.operator, System.currentTimeMillis() / 1000, new Object[][] {{this.peerA, 100}}));
+        // the other store knows the revocation, and therefore refused the operator's list
+        final TrustStore revoker = new TrustStore(null, () -> this.coordinators, () -> "lab");
+        revoker.importJSON("{\"envelopes\":[" + delegation(this.coordinator, this.operator, 2, true).toString() + "]}", false);
+        assertTrue(this.store.isNewer(revoker.versionSummary()));
+    }
+
+    @Test
     public void testOtherNetworkIsIgnored() throws Exception {
         final TrustStore other = new TrustStore(null, () -> this.coordinators, () -> "freeworld");
         other.importJSON(list(this.coordinator, 1, new Object[][] {{this.peerA, 100}}).toString(), false);

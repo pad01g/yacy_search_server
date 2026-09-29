@@ -76,7 +76,7 @@ GET or POST /yacy/search.html?iam=...&language=...&query=...&contentdom=...&abst
 
 ### Trust And Time Limits
 
-This fork checks the author signature of every document before it answers (see `docs/trust-and-nat.md` and `yacy/trust.md`). Documents with an invalid signature are never returned. Documents whose author is not in the trust set of this peer, and unsigned documents that arrived by DHT transfer, are returned only if the peer runs in open mode (`trust.search.acceptUnverified=true`). The snippet, text and description of a document are only returned when this peer is the author or the author is trusted, because they are not covered by the signature. The `time` parameter (search time in milliseconds) is capped by this peer's `remotesearch.maxtime` and never exceeds 10000 ms.
+This fork checks the author signature of every document before it answers (see `docs/trust-and-nat.md` and `yacy/trust.md`). When it answers another peer, it drops only documents with an invalid signature: the searching peer applies its own trust set, and drops the snippets, text and description it cannot trust (they are not covered by the signature). The `time` parameter (search time in milliseconds) is capped by `network.unit.remotesearch.maxtime` and never exceeds 10000 ms.
 
 ## What To Expect
 

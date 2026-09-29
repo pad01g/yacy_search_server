@@ -122,13 +122,31 @@ public final class Ed25519 {
         final File dir = file.getAbsoluteFile().getParentFile();
         if (dir != null) dir.mkdirs();
         final File tmp = new File(dir, file.getName() + ".tmp");
-        Files.write(tmp.toPath(), pem.getBytes(StandardCharsets.US_ASCII));
-        try {
-            Files.setPosixFilePermissions(tmp.toPath(), PosixFilePermissions.fromString("rw-------"));
-        } catch (final UnsupportedOperationException | IOException e) {
-            // not a POSIX file system; keep the default permissions
-        }
+        writePrivateFile(tmp, pem.getBytes(StandardCharsets.US_ASCII));
         Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    /**
+     * Write a secret to a new file that only the owner can read, from the first byte on (writing first and restricting
+     * afterwards leaves a moment in which other users can read it).
+     */
+    public static void writePrivateFile(final File file, final byte[] data) throws IOException {
+        Files.deleteIfExists(file.toPath());
+        try {
+            Files.createFile(file.toPath(), PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+        } catch (final UnsupportedOperationException e) {
+            Files.createFile(file.toPath()); // not a POSIX file system
+        }
+        Files.write(file.toPath(), data);
+    }
+
+    /** remove group and other permissions of an existing secret file (created by an older version, or by hand) */
+    public static void restrictToOwner(final File file) {
+        try {
+            Files.setPosixFilePermissions(file.toPath(), PosixFilePermissions.fromString("rw-------"));
+        } catch (final UnsupportedOperationException | IOException e) {
+            // not a POSIX file system
+        }
     }
 
     /** read a PKCS#8 PEM Ed25519 private key and derive its public key */

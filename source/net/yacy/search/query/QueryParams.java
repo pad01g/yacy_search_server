@@ -665,12 +665,17 @@ public final class QueryParams {
         String bf = actRanking.getBoostFunction();
         final String qf = actRanking.getQueryFields();
         if (!qf.isEmpty()) params.setParam(DisMaxParams.QF, qf);
-        if (termCount > 1) {
-            // add boost on combined words, strongest when the whole query appears as a phrase in the title
-            if (bq.length() > 0) bq += "\n";
-            bq += CollectionSchema.text_t.getSolrFieldName() + ":\"" + this.queryGoal.getIncludeString() + "\"^10";
-            final String titleBoost = titlePhraseBoost();
-            if (titleBoost != null) bq += "\n" + CollectionSchema.title.getSolrFieldName() + ":\"" + this.queryGoal.getIncludeString() + "\"^" + titleBoost;
+        if (this.queryGoal.getIncludeSize() > 1) {
+            // add boost on combined words (also for a single quoted phrase), strongest when the whole query appears as a
+            // phrase in the title. Each bq line is parsed on its own: a stray quote or backslash would make Solr reject
+            // the whole request, here and on the remote peers that receive the query.
+            final String phrase = phraseForBoost(this.queryGoal.getIncludeString());
+            if (!phrase.isEmpty()) {
+                if (bq.length() > 0) bq += "\n";
+                bq += CollectionSchema.text_t.getSolrFieldName() + ":\"" + phrase + "\"^10";
+                final String titleBoost = titlePhraseBoost();
+                if (titleBoost != null) bq += "\n" + CollectionSchema.title.getSolrFieldName() + ":\"" + phrase + "\"^" + titleBoost;
+            }
         }
         if (fq.length() > 0) {
             String[] oldfq = params.getFilterQueries();
@@ -714,7 +719,53 @@ public final class QueryParams {
         final String key = cjk ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK : SwitchboardConstants.SEARCH_RANKING_SOLR_MM;
         final String dflt = cjk ? SwitchboardConstants.SEARCH_RANKING_SOLR_MM_CJK_DEFAULT : SwitchboardConstants.SEARCH_RANKING_SOLR_MM_DEFAULT;
         final String value = sb == null ? dflt : sb.getConfig(key, dflt).trim();
-        return value.isEmpty() ? dflt : value; // an empty mm makes Solr reject the query
+        // an empty or malformed mm makes Solr reject every query, here and on the remote peers that receive it
+        return isValidMinimumMatch(value) ? value : dflt;
+    }
+
+    private static final java.util.regex.Pattern MM_PART = java.util.regex.Pattern.compile("(\\d+<)?-?\\d+%?");
+
+    /** @return true for a Solr minimum match specification such as "2", "-1", "75%" or "2<-1 5<80%" */
+    public static boolean isValidMinimumMatch(final String mm) {
+        if (mm == null || mm.isEmpty() || mm.length() > 100) return false;
+        for (final String part : mm.trim().split("\\s+")) if (!MM_PART.matcher(part).matches()) return false;
+        return true;
+    }
+
+    /**
+     * The number of the n terms that a Solr minimum match specification requires (Solr's calculateMinShouldMatch):
+     * conditional parts "k<v" apply when n > k, the last applicable one wins; without one, all terms are required.
+     */
+    public static int requiredTerms(final String mm, final int n) {
+        if (n <= 0) return 0;
+        if (!isValidMinimumMatch(mm)) return n;
+        String spec = null;
+        boolean conditional = false;
+        for (final String part : mm.trim().split("\\s+")) {
+            final int lt = part.indexOf('<');
+            if (lt < 0) {
+                spec = part;
+                continue;
+            }
+            conditional = true;
+            if (n > Integer.parseInt(part.substring(0, lt))) spec = part.substring(lt + 1);
+        }
+        if (spec == null) return n; // no unconditional part and no applicable condition: all terms
+        final boolean percent = spec.endsWith("%");
+        final int v = Integer.parseInt(percent ? spec.substring(0, spec.length() - 1) : spec);
+        int r;
+        if (percent) {
+            final int part = (int) Math.floor(n * Math.abs(v) / 100.0d);
+            r = v < 0 ? n - part : part;
+        } else {
+            r = v < 0 ? n + v : v;
+        }
+        return Math.max(0, Math.min(n, r));
+    }
+
+    /** the query as a phrase inside a bq clause: without quotes and backslashes */
+    static String phraseForBoost(final String s) {
+        return s == null ? "" : s.replace('"', ' ').replace('\\', ' ').replaceAll("\\s+", " ").trim();
     }
 
     /** @return the boost of the whole query as a phrase in the title, or null if it is switched off */
@@ -723,7 +774,8 @@ public final class QueryParams {
         final float b = sb == null ? SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT
                 : sb.getConfigFloat(SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST, SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT);
         if (!(b > 0f) || Float.isInfinite(b)) return null;
-        return Float.toString(Math.min(b, 1000f));
+        // plain notation: Solr reads "^1.0E-4" as "^1.0" followed by other terms
+        return java.math.BigDecimal.valueOf(Math.max(0.01f, Math.min(b, 1000f))).stripTrailingZeros().toPlainString();
     }
 
     private SolrQuery solrImageQuery(final boolean getFacets, final boolean strictContentDom) {

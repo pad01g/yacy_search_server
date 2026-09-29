@@ -102,6 +102,8 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
     public static String ANON_PREFIX = "agent";
 
     public static final int maxsize = 16000;
+    /** the largest decoded seed accepted from other peers */
+    public static final int MAX_DECODED_SIZE = 32768;
     /**
      * <b>substance</b> "sI" (send index/words)
      */
@@ -1422,9 +1424,10 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
         if ( seedStr.isEmpty() ) {
             throw new IOException("seedStr.isEmpty()");
         }
-        final String seed = crypt.simpleDecode(seedStr);
+        // seeds come from other peers: bound the decoded size (a small gzip string can expand to megabytes)
+        final String seed = crypt.simpleDecode(seedStr, MAX_DECODED_SIZE);
         if ( seed == null ) {
-            throw new IOException("seed == null");
+            throw new IOException("seed == null or decoded seed larger than " + MAX_DECODED_SIZE);
         }
         if ( seed.isEmpty() ) {
             throw new IOException("seed.isEmpty()");

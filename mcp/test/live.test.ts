@@ -46,7 +46,7 @@ test("all tools against a live peer", { skip: !live && "set YACY_URL (and YACY_A
     console.log("evaluate_ranking", JSON.stringify(evaluation.mean));
     assert.ok(evaluation.mean.recallAtK > 0);
     if (process.env.YACY_TEST_CRAWL) {
-      const crawl = await call("crawl", { url: process.env.YACY_TEST_CRAWL, depth: 0 });
+      const crawl = await call("crawl", { url: process.env.YACY_TEST_CRAWL, depth: 0, maxPages: 10 });
       console.log("crawl", crawl.message);
       assert.match(crawl.message, /started/);
     }

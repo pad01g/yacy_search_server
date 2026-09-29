@@ -39,6 +39,15 @@ public final class Provenance {
     static final int BLOOM_MIN_BITS = 512;
     static final int BLOOM_MAX_BITS = 32768;
     static final int BLOOM_HASHES = 4;
+    /** above this share of set bits, a word matches by chance with probability > 0.5^4 = 6% */
+    static final double BLOOM_MAX_FILL = 0.5d;
+
+    static double fillRatio(final byte[] filter) {
+        if (filter == null || filter.length == 0) return 1.0d;
+        int set = 0;
+        for (final byte b : filter) set += Integer.bitCount(b & 0xff);
+        return (double) set / (filter.length * 8);
+    }
     /** longest accepted value; a 32768 bit bloom filter is 5462 base64 characters */
     public static final int MAX_LENGTH = 6000;
 
@@ -84,9 +93,15 @@ public final class Provenance {
             return this.entry == null ? 1.0d : this.entry.weight();
         }
 
-        /** @return true if every word hash is (probably) in the document; always true for documents without a filter */
+        /**
+         * @return true if every word hash is (probably) in the document; always true for documents without a filter.
+         *         The filter of a very long document of another author can be so full that it matches almost any word;
+         *         it then does not vouch for the words, and word index results of that document are not used (they
+         *         can still be found through Solr, which matches the text itself).
+         */
         public boolean containsAll(final Iterable<byte[]> wordHashes) {
             if (this.bloom == null) return true;
+            if (this.status != Status.SELF && fillRatio(this.bloom) > BLOOM_MAX_FILL) return false;
             for (final byte[] h : wordHashes) if (!bloomContains(this.bloom, h)) return false;
             return true;
         }

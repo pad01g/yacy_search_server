@@ -280,4 +280,29 @@ public class QueryParamsTest {
 			Assert.assertEquals(entry.getValue(), sb.toString());
 		}
 	}
+
+	@Test
+	public void testMinimumMatchValidationAndRequiredTerms() {
+		Assert.assertTrue(QueryParams.isValidMinimumMatch("2<-1 5<80%"));
+		Assert.assertTrue(QueryParams.isValidMinimumMatch("100%"));
+		Assert.assertTrue(QueryParams.isValidMinimumMatch("-1"));
+		Assert.assertFalse(QueryParams.isValidMinimumMatch("abc"));
+		Assert.assertFalse(QueryParams.isValidMinimumMatch("2 of 3"));
+		Assert.assertFalse(QueryParams.isValidMinimumMatch(""));
+		// 2 terms: both; 3-5: all but one; 6 and more: 80 %
+		Assert.assertEquals(2, QueryParams.requiredTerms("2<-1 5<80%", 2));
+		Assert.assertEquals(2, QueryParams.requiredTerms("2<-1 5<80%", 3));
+		Assert.assertEquals(4, QueryParams.requiredTerms("2<-1 5<80%", 5));
+		Assert.assertEquals(4, QueryParams.requiredTerms("2<-1 5<80%", 6));
+		Assert.assertEquals(1, QueryParams.requiredTerms("1", 3));
+		Assert.assertEquals(3, QueryParams.requiredTerms("100%", 3));
+		Assert.assertEquals(3, QueryParams.requiredTerms("garbage", 3));
+	}
+
+	@Test
+	public void testPhraseForBoostHasNoQuotesOrBackslashes() {
+		Assert.assertEquals("say hello world", QueryParams.phraseForBoost("say\"hello world"));
+		Assert.assertEquals("bar foo", QueryParams.phraseForBoost("bar foo\\"));
+		Assert.assertEquals("c: temp dir", QueryParams.phraseForBoost("c:\\temp dir\\"));
+	}
 }

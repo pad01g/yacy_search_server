@@ -66,14 +66,6 @@ public final class CJKBigrams {
     }
 
     /**
-     * Split a token into its non-CJK parts, which are kept as they are, and the
-     * overlapping bigrams of its CJK runs. A CJK run of a single character is kept
-     * as a single character token.
-     *
-     * @param token a token without white space
-     * @return the parts in their original order; the token itself if it has no CJK characters
-     */
-    /**
      * The number of words of a text: runs of letters or digits separated by other characters. Chinese, Japanese and
      * Korean text has no spaces; a run of n CJK characters counts as n / 2 words (rounded up), about the average
      * word length. Counting spaces (as before) gave a whole CJK paragraph the count 1.
@@ -109,20 +101,38 @@ public final class CJKBigrams {
         return words;
     }
 
-    public static List<String> split(final String token) {
+    /**
+     * Split a token into its non-CJK parts, which are kept as they are, and the
+     * overlapping bigrams of its CJK runs. A CJK run of a single character is kept
+     * as a single character token.
+     *
+     * Tokens are brought to NFKC (half-width katakana ｶﾀｶﾅ becomes カタカナ, like Solr's CJKWidthFilter). Surrogate
+     * pairs (supplementary Han characters, emoji) separate parts, as in the index, where the sentence reader treats
+     * them as invisible; parts without letters or digits are dropped. Index and query both split with this method.
+     *
+     * @param token a token without white space
+     * @return the parts in their original order; the token itself if it has no CJK characters
+     */
+    public static List<String> split(final String rawToken) {
         final List<String> parts = new ArrayList<>();
-        if (!containsCJK(token)) {
-            parts.add(token);
+        if (!containsCJK(rawToken)) {
+            parts.add(rawToken);
             return parts;
         }
+        final String token = java.text.Normalizer.normalize(rawToken, java.text.Normalizer.Form.NFKC);
         int i = 0;
         final int n = token.length();
         while (i < n) {
+            if (Character.isSurrogate(token.charAt(i))) {
+                i++;
+                continue;
+            }
             final boolean cjk = isCJK(token.charAt(i));
             int j = i + 1;
-            while (j < n && isCJK(token.charAt(j)) == cjk) j++;
+            while (j < n && !Character.isSurrogate(token.charAt(j)) && isCJK(token.charAt(j)) == cjk) j++;
             if (!cjk) {
-                parts.add(token.substring(i, j));
+                final String part = token.substring(i, j);
+                if (hasLetterOrDigit(part)) parts.add(part);
             } else if (j - i == 1) {
                 parts.add(token.substring(i, j));
             } else {
@@ -131,5 +141,10 @@ public final class CJKBigrams {
             i = j;
         }
         return parts;
+    }
+
+    private static boolean hasLetterOrDigit(final String s) {
+        for (int i = 0; i < s.length(); i++) if (Character.isLetterOrDigit(s.charAt(i))) return true;
+        return false;
     }
 }

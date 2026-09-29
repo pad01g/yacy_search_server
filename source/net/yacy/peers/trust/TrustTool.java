@@ -91,7 +91,8 @@ public final class TrustTool {
 
     private static long version(final String v) {
         final long n = Long.parseLong(v);
-        if (n < 1 || n > TrustStore.MAX_VERSION) throw new IllegalArgumentException("version must be 1.." + TrustStore.MAX_VERSION);
+        final long max = TrustStore.maxAcceptedVersion();
+        if (n < 1 || n > max) throw new IllegalArgumentException("version must be 1.." + max + " (peers refuse versions more than a day ahead of the current Unix time)");
         return n;
     }
 

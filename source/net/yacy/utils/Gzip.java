@@ -121,6 +121,25 @@ public class Gzip {
         return null;
     }
     
+    /**
+     * @return the uncompressed bytes, or null if they are not gzip or longer than maxBytes (compressed data from other
+     *         peers can expand a thousandfold)
+     */
+    public static byte[] gunzip(final byte[] b, final int maxBytes) {
+        final byte[] buffer = new byte[8192];
+        try (GZIPInputStream in = new GZIPInputStream(new ByteArrayInputStream(b), Math.max(512, Math.min(65536, b.length)))) {
+            final ByteArrayOutputStream baos = new ByteArrayOutputStream(Math.min(maxBytes, b.length * 4 + 16));
+            int l;
+            while ((l = in.read(buffer)) > 0) {
+                if (baos.size() + l > maxBytes) return null;
+                baos.write(buffer, 0, l);
+            }
+            return baos.toByteArray();
+        } catch (final IOException e) {
+            return null;
+        }
+    }
+
     public static byte[] gunzip(byte[] b) {
         byte[] buffer = new byte[Math.min(2^20, b.length)];
         try {

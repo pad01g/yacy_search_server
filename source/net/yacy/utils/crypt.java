@@ -81,6 +81,23 @@ public class crypt {
     }
     }
 
+    /**
+     * {@link #simpleDecode(String)} for data from other peers: null if the decoded text is longer than maxChars.
+     */
+    public static String simpleDecode(final String encoded, final int maxChars) {
+        if (encoded == null || encoded.length() < 3 || encoded.charAt(1) != '|' || encoded.charAt(0) != 'z') {
+            final String s = simpleDecode(encoded);
+            return s == null || s.length() > maxChars ? null : s;
+        }
+        try {
+            final byte[] raw = Base64Order.enhancedCoder.decode(encoded.substring(2));
+            final byte[] plain = raw == null ? null : net.yacy.utils.Gzip.gunzip(raw, maxChars);
+            return plain == null ? null : net.yacy.cora.document.encoding.UTF8.String(plain);
+        } catch (final RuntimeException e) {
+            return null;
+        }
+    }
+
     public static String simpleDecode(final String encoded) {
         if (encoded == null || encoded.length() < 3) {
             return null;

@@ -52,6 +52,16 @@ public final class TrustStore {
     static final int MAX_PEERS_PER_LIST = 10000;
     /** versions above this are rejected, so that sums of versions cannot overflow */
     static final long MAX_VERSION = 1L << 40;
+    /**
+     * Versions are at most a day ahead of the current Unix time (small counters are far below it). Without this bound
+     * an operator could publish a list with version 2^40: it could never publish another one, and peers holding it
+     * would announce so high a version sum that they never fetch newer statements.
+     */
+    static final long MAX_FUTURE_SECONDS = 86400;
+
+    static long maxAcceptedVersion() {
+        return Math.min(MAX_VERSION, System.currentTimeMillis() / 1000 + MAX_FUTURE_SECONDS);
+    }
 
     public static final class Entry {
         public final String publicKey;
@@ -170,7 +180,7 @@ public final class TrustStore {
         // statements for other networks are neither used nor stored: a higher version for another network must not
         // block the versions of ours, and a revocation for another network must not revoke an operator here
         if (!e.appliesTo(this.network.get())) return false;
-        if (e.version > MAX_VERSION) return false;
+        if (e.version > maxAcceptedVersion()) return false;
         final List<String> coords = this.coordinators.get();
         if (TrustEnvelope.TYPE_DELEGATION.equals(e.type)) {
             if (!coords.contains(e.signer)) return false;
@@ -287,22 +297,31 @@ public final class TrustStore {
             final String pk = canonicalKey(p.optString("pk", null));
             if (pk == null) continue;
             final String hash = PeerIdentity.peerHashOf(pk);
-            if (result.containsKey(hash)) continue;
-            final int priority = Math.max(0, Math.min(100, p.optInt("priority", 100)));
+            final Entry known = result.get(hash);
+            // a coordinator listed earlier decides; lists under the same coordinator are merged: the lowest priority
+            // and all tags, so that one operator cannot drop a tag (e.g. ads) that another operator declared
+            if (known != null && known.coordinator != coordinatorIndex) continue;
+            int priority = Math.max(0, Math.min(100, p.optInt("priority", 100)));
             final Set<String> tags = new LinkedHashSet<>();
+            if (known != null) {
+                priority = Math.min(priority, known.priority);
+                tags.addAll(known.tags);
+            }
             final JSONArray t = p.optJSONArray("tags");
             if (t != null) for (int j = 0; j < t.length() && j < 32; j++) {
                 final String tag = t.optString(j, "").trim().toLowerCase(java.util.Locale.ROOT);
-                if (TrustPolicy.isValidTag(tag)) tags.add(tag);
+                if (TrustPolicy.isValidTag(tag) && tags.size() < 32) tags.add(tag);
             }
             result.put(hash, new Entry(pk, hash, priority, tags, coordinatorIndex));
         }
     }
 
     /**
-     * The versions this peer holds, per coordinator: the sum of the versions of the coordinator's delegations and of
-     * the lists of its operators. The sum grows whenever one of them is replaced by a newer version.
-     * @return "c8.v|c8.v" with c8 the first 8 characters of the coordinator's peer hash
+     * The versions this peer holds, per coordinator, as two sums: of what the coordinator signed itself (its
+     * delegations and its own list), and of the lists of its operators. Each sum grows whenever one of its parts is
+     * replaced by a newer version. The coordinator's sum is compared first, so that a revocation (a newer delegation)
+     * reaches peers that hold many operator list versions.
+     * @return "c8.coordinator.operators|..." with c8 the first 8 characters of the coordinator's peer hash
      */
     public String versionSummary() {
         return versionSummary(this.coordinators.get(), this.network.get());
@@ -312,7 +331,8 @@ public final class TrustStore {
         final StringBuilder sb = new StringBuilder();
         for (final String c : coordinators) {
             if (sb.length() > 0) sb.append('|');
-            sb.append(PeerIdentity.peerHashOf(c).substring(0, 8)).append('.').append(versionSum(c, network));
+            final long[] sums = versionSums(c, network);
+            sb.append(PeerIdentity.peerHashOf(c).substring(0, 8)).append('.').append(sums[0]).append('.').append(sums[1]);
         }
         return sb.toString();
     }
@@ -321,43 +341,45 @@ public final class TrustStore {
      * The sum must only grow: count the lists of every operator the coordinator ever delegated to, also revoked ones,
      * otherwise a revocation would lower the sum and peers would not fetch it.
      */
-    private long versionSum(final String coordinator, final String network) {
-        long sum = 0;
-        final List<String> signers = new ArrayList<>();
-        signers.add(coordinator);
+    private long[] versionSums(final String coordinator, final String network) {
+        long own = 0;
+        long operators = 0;
+        final TrustEnvelope ownList = this.lists.get(coordinator);
+        if (ownList != null) own += ownList.version;
         final Map<String, TrustEnvelope> byOperator = this.delegations.get(coordinator);
         if (byOperator != null) {
             for (final Map.Entry<String, TrustEnvelope> d : byOperator.entrySet()) {
-                sum += d.getValue().version;
-                if (!signers.contains(d.getKey())) signers.add(d.getKey());
+                own += d.getValue().version;
+                if (d.getKey().equals(coordinator)) continue;
+                final TrustEnvelope l = this.lists.get(d.getKey());
+                if (l != null) operators += l.version;
             }
         }
-        for (final String signer : signers) {
-            final TrustEnvelope l = this.lists.get(signer);
-            if (l != null) sum += l.version;
-        }
-        return sum;
+        return new long[] {own, operators};
     }
 
     /** @return true if the remote summary announces a newer state for one of our coordinators */
     public boolean isNewer(final String remoteSummary) {
         if (remoteSummary == null || remoteSummary.isEmpty()) return false;
-        final Map<String, Long> remote = parseSummary(remoteSummary);
-        final Map<String, Long> local = parseSummary(versionSummary());
-        for (final Map.Entry<String, Long> r : remote.entrySet()) {
-            final Long l = local.get(r.getKey());
-            if (l != null && r.getValue() > l) return true;
+        final Map<String, long[]> remote = parseSummary(remoteSummary);
+        final Map<String, long[]> local = parseSummary(versionSummary());
+        for (final Map.Entry<String, long[]> r : remote.entrySet()) {
+            final long[] l = local.get(r.getKey());
+            if (l == null) continue;
+            final long[] v = r.getValue();
+            if (v[0] > l[0] || (v[0] == l[0] && v[1] > l[1])) return true;
         }
         return false;
     }
 
-    static Map<String, Long> parseSummary(final String s) {
-        final Map<String, Long> m = new HashMap<>();
+    static Map<String, long[]> parseSummary(final String s) {
+        final Map<String, long[]> m = new HashMap<>();
+        if (s.length() > 4096) return m;
         for (final String part : s.split("\\|")) {
-            final int p = part.indexOf('.');
-            if (p <= 0) continue;
+            final String[] f = part.split("\\.");
+            if (f.length != 3 || f[0].isEmpty()) continue;
             try {
-                m.put(part.substring(0, p), Long.parseLong(part.substring(p + 1)));
+                m.put(f[0], new long[] {Long.parseLong(f[1]), Long.parseLong(f[2])});
             } catch (final NumberFormatException e) {
                 // ignore
             }

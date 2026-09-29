@@ -207,6 +207,8 @@ public final class TrustService {
         }
     }
 
+    private static final java.security.SecureRandom NONCES = new java.security.SecureRandom();
+
     private static void readSidecar() {
         final String base = TrustPolicy.sidecarURL();
         if (base == null) {
@@ -214,13 +216,23 @@ public final class TrustService {
             return;
         }
         try {
-            final byte[] body = fetch(base + "/status", 64 * 1024, Duration.ofSeconds(3), P2PRoute.token());
+            // the sidecar must prove that it holds our key: it signs a fresh nonce. The peer id alone is public (it is in
+            // the seed), so another local process that took the port could claim it. Only a proven sidecar gets the
+            // token (with the tunnel requests), and only it is used for tunnels.
+            final PeerIdentity me = PeerIdentity.get();
+            if (me == null) throw new IOException("no peer identity");
+            final byte[] n = new byte[16];
+            NONCES.nextBytes(n);
+            final String nonce = Ed25519.encode(n);
+            final byte[] body = fetch(base + "/status?nonce=" + nonce, 64 * 1024, Duration.ofSeconds(3), null);
             if (body == null) throw new IOException("no answer");
             final JSONObject o = new JSONObject(new String(body, StandardCharsets.UTF_8));
-            // the sidecar must run with our key; another process listening on that port must not be used
-            final PeerIdentity me = PeerIdentity.get();
-            if (me != null && !me.libp2pPeerId().equals(o.optString("peerId", ""))) {
+            if (!me.libp2pPeerId().equals(o.optString("peerId", ""))) {
                 throw new IOException("the sidecar reports peer id " + o.optString("peerId", "") + ", expected " + me.libp2pPeerId());
+            }
+            final String signed = "yacy-sidecar-status-v1|" + nonce + "|" + o.optString("peerId", "") + "|" + o.optString("boot", "");
+            if (!Ed25519.verify(me.publicKeyB64(), signed, o.optString("sig", ""))) {
+                throw new IOException("the process at " + base + " did not prove that it holds our peer key (old sidecar version, or not our sidecar)");
             }
             final List<String> relay = new ArrayList<>();
             final JSONArray a = o.optJSONArray("relayAddrs");

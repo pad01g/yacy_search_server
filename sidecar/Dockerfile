@@ -2,10 +2,10 @@
 #   docker build -t yacy-lab/sidecar:latest sidecar/
 FROM golang:1.26-alpine AS build
 WORKDIR /src
-COPY go.mod go.sum* ./
-RUN go mod download || true
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
 COPY . .
-RUN go mod tidy && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /yacy-sidecar .
+RUN CGO_ENABLED=0 go build -mod=readonly -trimpath -ldflags="-s -w" -o /yacy-sidecar .
 
 FROM alpine:3.22
 RUN adduser -D -H sidecar && mkdir -p /data && chown sidecar:sidecar /data

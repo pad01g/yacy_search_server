@@ -1021,6 +1021,11 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         // documents that contain all terms.
         final List<String> coverageTerms = this.coverageTerms();
         final int coverageExponent = this.coverageExponent();
+        // Solr already required this share of the terms (minimum match). The coverage check only sees title, URL and
+        // snippets, and can miss a term that Solr matched elsewhere (e.g. beyond the highlighted part of a long text,
+        // or in a copy whose snippets were dropped); it must not weigh a result below what Solr guarantees.
+        final double guaranteedCoverage = coverageTerms.isEmpty() ? 1.0d
+                : (double) QueryParams.requiredTerms(QueryParams.minimumMatch(this.query.getQueryGoal()), coverageTerms.size()) / coverageTerms.size();
 
         long timer = System.currentTimeMillis();
 
@@ -1157,7 +1162,8 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
                         final Float scorex = (Float) iEntry.getFieldValue("score"); // this is a special field containing the ranking score of a Solr search result
                         if (scorex != null && scorex > 0) {
                             final double normalized = maxSolrScore > 0.0f ? scorex / maxSolrScore : scorex; // normalize to [0,1] across this peer's batch so scores are comparable across peers
-                            final double coverage = Math.max(COVERAGE_FLOOR, Math.pow(termCoverage(iEntry, coverageTerms, this.snippets.get(urlHash)), coverageExponent));
+                            final double covered = Math.max(guaranteedCoverage, termCoverage(iEntry, coverageTerms, this.snippets.get(urlHash)));
+                            final double coverage = Math.max(COVERAGE_FLOOR, Math.pow(covered, coverageExponent));
                             score = (long) ((1000000.0d * normalized * coverage) - iEntry.urllength());
                         } else
                             score = this.order.cardinal(iEntry);
@@ -2024,11 +2030,12 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
 
     /**
      * @return the weight of a result with this many words of text: 1 at or above thinWords, else
-     *         (words / thinWords) ^ exponent, at least {@link SwitchboardConstants#SEARCH_RANKING_THIN_FLOOR}. An
-     *         unknown count (0: not delivered, or a document without text such as an image) weighs 1.
+     *         (words / thinWords) ^ exponent, at least {@link SwitchboardConstants#SEARCH_RANKING_THIN_FLOOR}. A page
+     *         without text (0 words) is the thinnest and gets the floor; an unknown count (negative: not delivered)
+     *         weighs 1.
      */
     static double thinWeight(final int words, final int thinWords, final double exponent) {
-        if (thinWords <= 0 || !(exponent > 0) || words <= 0 || words >= thinWords) return 1.0d;
+        if (thinWords <= 0 || !(exponent > 0) || words < 0 || words >= thinWords) return 1.0d;
         return Math.max(SwitchboardConstants.SEARCH_RANKING_THIN_FLOOR, Math.pow((double) words / thinWords, exponent));
     }
 
@@ -2133,7 +2140,7 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         if (resultEntry.word() != null && !verdict.containsAll(this.query.getQueryGoal().getIncludeHashes())) return;
         final long rankingBoost = isPreferredLocalRichCandidate(resultEntry) ? LOCAL_RICH_TEXT_RANKING_BOOST : 0L;
         final long raw = (this.disablePostRanking ? score : (score * 128) + postRanking(resultEntry, this.ref /*this.getTopicNavigator(MAX_TOPWORDS)*/)) + rankingBoost;
-        final long ranking = trustRanking(thinRanking(raw, resultEntry.wordCount(), this.thinWords, this.thinExponent), verdict);
+        final long ranking = trustRanking(thinRanking(raw, resultEntry.wordCountOrUnknown(), this.thinWords, this.thinExponent), verdict);
         // TODO: above was originally using (see below), but getTopicNavigator returns this.ref and possibliy alters this.ref on first call (this.ref.size < 2 -> this.ref.clear)
         // TODO: verify and straighten the use of addTopic, getTopic and getTopicNavigator and related score calculation
         // final long ranking = ((long) (score * 128.f)) + postRanking(resultEntry, this.getTopicNavigator(MAX_TOPWORDS));

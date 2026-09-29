@@ -20,6 +20,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -68,6 +69,12 @@ const (
 	requestDeadline = 60 * time.Second
 	// perPeerStreams bounds concurrent requests of one remote peer to the local YaCy
 	perPeerStreams = 8
+	// totalStreams bounds concurrent requests of all remote peers: peer ids cost nothing to create
+	totalStreams = 64
+	// maxRetired bounds tunnels that were pushed out or expired and still hold their port for tunnelRetire
+	maxRetired = 256
+	// smallRequestBody is the limit for every path but the index transfers
+	smallRequestBody = 1 << 20
 )
 
 // allowedPath: only the peer-to-peer interface of YaCy is reachable through the sidecar, never the admin pages
@@ -87,6 +94,7 @@ const tunnelRetire = 10 * time.Minute
 
 type sidecar struct {
 	host     host.Host
+	priv     crypto.PrivKey
 	yacy     *url.URL
 	token    string
 	boot     string
@@ -101,6 +109,7 @@ type sidecar struct {
 	rsvp     map[peer.ID][]string
 	streamMu sync.Mutex
 	streams  map[string]int
+	total    int
 }
 
 func main() {
@@ -112,7 +121,8 @@ func main() {
 	yacyURL := flag.String("yacy", "http://127.0.0.1:8096", "base URL of the sidecar connector of the local YaCy")
 	relaysFlag := flag.String("relay", "", "relays, comma separated: multiaddrs with /p2p/<id>, or http://host:port of a relay sidecar's control API")
 	relayService := flag.Bool("relay-service", false, "act as a circuit relay for other peers")
-	relayAllow := flag.String("relay-allow", "", "file with libp2p peer ids (one per line) allowed to use the relay; empty: everybody")
+	relayAllow := flag.String("relay-allow", "", "file with libp2p peer ids (one per line) allowed to use the relay")
+	relayOpen := flag.Bool("relay-open", false, "let every libp2p peer use the relay (without -relay-allow the relay refuses to start)")
 	reachability := flag.String("reachability", "auto", "auto, public or private (override AutoNAT)")
 	keyWait := flag.Duration("key-wait", 5*time.Minute, "how long to wait for the key and token files to appear")
 	flag.Parse()
@@ -154,6 +164,9 @@ func main() {
 		// networks, so that the relay does not carry traffic of strangers.
 		res.Limit = &relay.RelayLimit{Duration: 30 * time.Minute, Data: 4 * maxResponseBody}
 		relayOpts := []relay.Option{relay.WithResources(res)}
+		if *relayAllow == "" && !*relayOpen {
+			log.Fatal("-relay-service needs -relay-allow <file> or -relay-open: an open relay carries the traffic of every libp2p node")
+		}
 		if *relayAllow != "" {
 			acl, err := loadACL(*relayAllow)
 			if err != nil {
@@ -174,7 +187,7 @@ func main() {
 		log.Fatalf("libp2p: %v", err)
 	}
 	s := &sidecar{
-		host: h, yacy: yacy, token: token, boot: randomID(),
+		host: h, priv: priv, yacy: yacy, token: token, boot: randomID(),
 		tunnels: map[peer.ID]*tunnelEntry{}, reach: network.ReachabilityUnknown,
 		rsvp: map[peer.ID][]string{}, streams: map[string]int{},
 	}
@@ -194,9 +207,11 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/status", s.guard(*httpAddr, s.handleStatus))
+	// /status holds no secret (the same facts are in the seed) and proves with a signature that this sidecar holds the
+	// peer key: YaCy checks that before it sends the token, so a process that took the port first learns nothing
+	mux.HandleFunc("/status", s.guard(*httpAddr, false, s.handleStatus))
 	if !*relayService {
-		mux.HandleFunc("/tunnel/", s.guard(*httpAddr, s.handleTunnel))
+		mux.HandleFunc("/tunnel/", s.guard(*httpAddr, true, s.handleTunnel))
 	}
 	log.Fatal((&http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}).ListenAndServe())
 }
@@ -310,7 +325,7 @@ func loadACL(file string) (acl, error) {
 // and not sent by a web page (Origin / Sec-Fetch-Site) are served. This stops local web pages and DNS rebinding.
 // A relay publishes its /status on all interfaces (other sidecars read its peer id there); then the host is not
 // checked, and the relay offers no /tunnel.
-func (s *sidecar) guard(listenAddr string, next http.HandlerFunc) http.HandlerFunc {
+func (s *sidecar) guard(listenAddr string, needToken bool, next http.HandlerFunc) http.HandlerFunc {
 	host, port, _ := net.SplitHostPort(listenAddr)
 	public := host == "0.0.0.0" || host == "" || host == "::"
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +337,7 @@ func (s *sidecar) guard(listenAddr string, next http.HandlerFunc) http.HandlerFu
 			http.Error(w, "not for web pages", http.StatusForbidden)
 			return
 		}
-		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-YaCy-Sidecar-Token")), []byte(s.token)) != 1 {
+		if needToken && s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-YaCy-Sidecar-Token")), []byte(s.token)) != 1 {
 			http.Error(w, "token required", http.StatusUnauthorized)
 			return
 		}
@@ -427,6 +442,8 @@ type status struct {
 	RelayAddrs   []string `json:"relayAddrs"`
 	Relays       []string `json:"relays"`
 	Tunnels      int      `json:"tunnels"`
+	// Sig signs statusMessage(nonce, peerId, boot) with the peer key when /status is asked with ?nonce=
+	Sig string `json:"sig,omitempty"`
 }
 
 func relayFromStatus(base string) (*peer.AddrInfo, error) {
@@ -556,8 +573,20 @@ func (s *sidecar) dropReservation(id peer.ID) {
 	s.rsvpMu.Unlock()
 }
 
-func (s *sidecar) handleStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *sidecar) handleStatus(w http.ResponseWriter, r *http.Request) {
 	st := status{PeerID: s.host.ID().String(), Boot: s.boot, Reachability: strings.ToLower(s.reachability().String())}
+	if nonce := r.URL.Query().Get("nonce"); nonce != "" {
+		if len(nonce) > 64 {
+			http.Error(w, "nonce too long", http.StatusBadRequest)
+			return
+		}
+		sig, err := s.priv.Sign([]byte(statusMessage(nonce, st.PeerID, st.Boot)))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		st.Sig = base64.RawURLEncoding.EncodeToString(sig)
+	}
 	seen := map[string]bool{}
 	for _, a := range s.host.Addrs() {
 		full := a.String() + "/p2p/" + s.host.ID().String()
@@ -594,6 +623,11 @@ func (s *sidecar) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(st)
 }
 
+// statusMessage is what the sidecar signs for YaCy; YaCy verifies it with the public key of its own peer key
+func statusMessage(nonce, peerID, boot string) string {
+	return "yacy-sidecar-status-v1|" + nonce + "|" + peerID + "|" + boot
+}
+
 // handleTunnel returns the local port of the tunnel to a peer, opening it on first use. The optional addrs
 // parameter carries the circuit addresses from the peer's seed ('|' separated).
 func (s *sidecar) handleTunnel(w http.ResponseWriter, r *http.Request) {
@@ -618,22 +652,24 @@ func (s *sidecar) handleTunnel(w http.ResponseWriter, r *http.Request) {
 
 // addPeerAddrs adds circuit addresses announced in a seed: only relay circuits that end in the peer's own id
 func (s *sidecar) addPeerAddrs(id peer.ID, list string) {
-	relays := map[peer.ID]bool{}
+	relays := map[peer.ID]peer.AddrInfo{}
 	for _, r := range s.currentRelays() {
-		relays[r.ID] = true
+		relays[r.ID] = r
 	}
 	for _, info := range circuitAddrs(id, list, relays) {
 		s.host.Peerstore().AddAddrs(id, info.Addrs, peerstore.TempAddrTTL)
 	}
 }
 
-// circuitAddrs parses at most 8 '|' separated circuit addresses of the peer through one of the given relays and
-// drops everything else: a seed must not make this sidecar dial arbitrary hosts
-func circuitAddrs(id peer.ID, list string, relays map[peer.ID]bool) []peer.AddrInfo {
+// circuitAddrs takes at most 8 '|' separated circuit addresses of the peer and keeps only the relay id of each: the
+// addresses are rebuilt from the configured relays' own addresses. A seed (or a peer lying in it) chooses neither the
+// host nor the port this sidecar dials; circuits through relays we do not know are dropped.
+func circuitAddrs(id peer.ID, list string, relays map[peer.ID]peer.AddrInfo) []peer.AddrInfo {
 	var out []peer.AddrInfo
-	for _, a := range strings.Split(list, "|") {
+	seen := map[peer.ID]bool{}
+	for n, a := range strings.Split(list, "|") {
 		a = strings.TrimSpace(a)
-		if a == "" || len(out) >= 8 {
+		if a == "" || n >= 8 {
 			continue
 		}
 		idx := strings.Index(a, "/p2p-circuit/")
@@ -652,11 +688,25 @@ func circuitAddrs(id peer.ID, list string, relays map[peer.ID]bool) []peer.AddrI
 		if err != nil {
 			continue
 		}
-		relay, err := peer.AddrInfoFromP2pAddr(relayPart)
-		if err != nil || !relays[relay.ID] {
+		claimed, err := peer.AddrInfoFromP2pAddr(relayPart)
+		if err != nil {
 			continue
 		}
-		out = append(out, *info)
+		known, ok := relays[claimed.ID]
+		if !ok || seen[claimed.ID] {
+			continue
+		}
+		seen[claimed.ID] = true
+		var addrs []ma.Multiaddr
+		for _, ra := range known.Addrs {
+			circuit, err := ma.NewMultiaddr(ra.String() + "/p2p/" + known.ID.String() + "/p2p-circuit")
+			if err == nil {
+				addrs = append(addrs, circuit)
+			}
+		}
+		if len(addrs) > 0 {
+			out = append(out, peer.AddrInfo{ID: id, Addrs: addrs})
+		}
 	}
 	return out
 }
@@ -678,7 +728,7 @@ func (s *sidecar) tunnel(id peer.ID) (int, error) {
 	port := l.Addr().(*net.TCPAddr).Port
 	entry := &tunnelEntry{port: port, listener: l, lastUsed: time.Now()}
 	if old, ok := s.tunnels[id]; ok {
-		s.retired = append(s.retired, old) // a retired tunnel of this peer keeps its port until it expires
+		s.retireLocked(old) // a retired tunnel of this peer keeps its port until it expires
 	}
 	s.tunnels[id] = entry
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "peer"})
@@ -743,9 +793,21 @@ func (s *sidecar) retireOldestLocked() {
 	sort.Slice(ids, func(i, j int) bool { return s.tunnels[ids[i]].lastUsed.Before(s.tunnels[ids[j]].lastUsed) })
 	if len(ids) > 0 {
 		t := s.tunnels[ids[0]]
-		t.retired = time.Now()
-		s.retired = append(s.retired, t)
 		delete(s.tunnels, ids[0])
+		s.retireLocked(t)
+	}
+}
+
+// retireLocked keeps a tunnel's port for tunnelRetire (it answers 410), at most maxRetired of them: beyond that the
+// oldest listener is closed, so that tunnels to many peer ids cannot exhaust file descriptors
+func (s *sidecar) retireLocked(t *tunnelEntry) {
+	if t.retired.IsZero() {
+		t.retired = time.Now()
+	}
+	s.retired = append(s.retired, t)
+	for len(s.retired) > maxRetired {
+		s.retired[0].listener.Close()
+		s.retired = s.retired[1:]
 	}
 }
 
@@ -756,9 +818,8 @@ func (s *sidecar) expireTunnels() {
 		s.mu.Lock()
 		for id, t := range s.tunnels {
 			if time.Since(t.lastUsed) > tunnelIdle {
-				t.retired = time.Now()
-				s.retired = append(s.retired, t)
 				delete(s.tunnels, id)
+				s.retireLocked(t)
 			}
 		}
 		kept := s.retired[:0]
@@ -871,15 +932,17 @@ func (s *sidecar) serveStreams() {
 func (s *sidecar) limitPerPeer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.streamMu.Lock()
-		if s.streams[r.RemoteAddr] >= perPeerStreams {
+		if s.streams[r.RemoteAddr] >= perPeerStreams || s.total >= totalStreams {
 			s.streamMu.Unlock()
 			http.Error(w, "too many concurrent requests", http.StatusTooManyRequests)
 			return
 		}
 		s.streams[r.RemoteAddr]++
+		s.total++
 		s.streamMu.Unlock()
 		defer func() {
 			s.streamMu.Lock()
+			s.total--
 			if s.streams[r.RemoteAddr]--; s.streams[r.RemoteAddr] <= 0 {
 				delete(s.streams, r.RemoteAddr)
 			}
@@ -914,7 +977,11 @@ func yacyHandler(yacy *url.URL, token string) http.Handler {
 			http.Error(w, "not available through the sidecar", http.StatusForbidden)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		limit := int64(smallRequestBody)
+		if r.URL.Path == "/yacy/transferRWI.html" || r.URL.Path == "/yacy/transferURL.html" {
+			limit = maxRequestBody // index transfers
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		proxy.ServeHTTP(w, r)
 	})
 }

@@ -57,6 +57,7 @@ public final class PeerIdentity {
     public static synchronized PeerIdentity init(final File keyFile) throws IOException {
         KeyPair pair;
         if (keyFile.exists()) {
+            Ed25519.restrictToOwner(keyFile);
             pair = Ed25519.readPrivateKey(keyFile);
         } else {
             pair = Ed25519.generate();

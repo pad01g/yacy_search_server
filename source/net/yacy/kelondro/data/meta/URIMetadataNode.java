@@ -310,8 +310,9 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
             CollectionSchema.id.getSolrFieldName(), CollectionSchema.sku.getSolrFieldName(), CollectionSchema.title.getSolrFieldName(),
             CollectionSchema.provenance_s.getSolrFieldName(), CollectionSchema.host_s.getSolrFieldName(), CollectionSchema.host_id_s.getSolrFieldName(),
             CollectionSchema.content_type.getSolrFieldName(), CollectionSchema.last_modified.getSolrFieldName(),
-            CollectionSchema.load_date_dt.getSolrFieldName(), CollectionSchema.fresh_date_dt.getSolrFieldName(),
-            CollectionSchema.size_i.getSolrFieldName(), CollectionSchema.wordcount_i.getSolrFieldName(),
+            CollectionSchema.load_date_dt.getSolrFieldName(),
+            // not kept: wordcount_i, size_i and fresh_date_dt are unsigned ranking inputs that a peer relaying another
+            // author's document could set to push it up or down (e.g. the thin content weighting)
             CollectionSchema.language_s.getSolrFieldName(), CollectionSchema.collection_sxt.getSolrFieldName(),
             CollectionSchema.httpstatus_i.getSolrFieldName(), CollectionSchema.url_protocol_s.getSolrFieldName(),
             CollectionSchema.url_file_ext_s.getSolrFieldName(), "score"));
@@ -496,6 +497,11 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
 
     public int wordCount() {
         return getInt(CollectionSchema.wordcount_i);
+    }
+
+    /** @return the word count, or -1 if the document carries none (not delivered, or removed from an untrusted copy) */
+    public int wordCountOrUnknown() {
+        return this.getFieldValue(CollectionSchema.wordcount_i.getSolrFieldName()) == null ? -1 : getInt(CollectionSchema.wordcount_i);
     }
 
     /**

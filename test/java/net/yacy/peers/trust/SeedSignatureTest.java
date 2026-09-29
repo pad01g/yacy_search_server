@@ -146,4 +146,28 @@ public class SeedSignatureTest {
         assertEquals(SeedSignature.Status.VALID, parsed.signatureStatus());
         assertEquals(id.peerHash(), parsed.hash);
     }
+
+    @Test
+    public void testNewlinesCannotMoveSignedFields() {
+        final PeerIdentity id = PeerIdentity.forKeys(Ed25519.generate());
+        final Seed s = seedOf(id);
+        s.put(Seed.PORTSSL, "8443");
+        s.put(Seed.REACH, Seed.REACH_RELAY);
+        SeedSignature.sign(s, id);
+        assertEquals(SeedSignature.Status.VALID, SeedSignature.verify(s));
+        // the same canonical bytes, but Reach moved into the value of PortSSL: the peer would look direct
+        s.getMap().remove(Seed.REACH);
+        s.put(Seed.PORTSSL, "8443\nReach=relay");
+        assertEquals(SeedSignature.Status.INVALID, SeedSignature.verify(s));
+    }
+
+    @Test
+    public void testCacheKeyIsShortForLargeSeeds() {
+        final PeerIdentity id = PeerIdentity.forKeys(Ed25519.generate());
+        final Seed s = seedOf(id);
+        final StringBuilder name = new StringBuilder();
+        for (int i = 0; i < 100000; i++) name.append('x');
+        s.put(Seed.NAME, name.toString());
+        assertTrue(SeedSignature.cacheKey(s).length() < 64);
+    }
 }

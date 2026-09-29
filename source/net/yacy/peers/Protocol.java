@@ -255,7 +255,7 @@ public final class Protocol {
                         Network.log.info("yacyClient.hello: consistency error: otherPeer.hash = " + otherPeer.hash + ", otherHash = " + targetHash);
                         return null; // no success
                     }
-                    if (!answeredChallenge(otherPeer, challenge, result, targetBaseURL)) return null;
+                    if (answeredChallenge(otherPeer, challenge, result, targetBaseURL) == Answer.FAILED) return null;
                 } catch (final IOException e ) {
                     Network.log.info("yacyClient.hello: consistency error: other seed bad:" + e.getMessage() + ", seed=" + seed);
                     return null; // no success
@@ -365,11 +365,16 @@ public final class Protocol {
                         final String host = routed ? null : resolvedHost(targetBaseURL);
                         if (host == null && !routed) continue;
                         s = Seed.genRemoteSeed(seedStr, false, host);
-                        if (!answeredChallenge(s, challenge, result, targetBaseURL)) return null;
+                        final Answer answer = answeredChallenge(s, challenge, result, targetBaseURL);
+                        if (answer == Answer.FAILED) return null;
+                        // an answer we cannot bind to our own address may have been relayed by another peer: the key
+                        // owner answered, but not necessarily at the address we contacted. Keep its known address.
+                        peerActions.peerArrival(s, answer == Answer.PROVEN);
+                        continue;
                     } else {
                         s = Seed.genRemoteSeed(seedStr, false, null);
                     }
-                    peerActions.peerArrival(s, (i == 1));
+                    peerActions.peerArrival(s, false);
                 } catch (final IOException e ) {
                     Network.log.info("hello/client: rejected contacting seed; bad (" + e.getMessage() + ")");
                 }
@@ -396,58 +401,58 @@ public final class Protocol {
         return ia == null ? null : ia.getHostAddress();
     }
 
-    /**
-     * A signed seed must prove, with the answer to our challenge, that the peer we reached owns its key, and that it
-     * answered a request that came from us (not one that another peer forwarded to it).
-     * Unsigned seeds (only accepted with trust.seed.acceptUnsigned=true) cannot prove anything and pass.
-     */
-    private static boolean answeredChallenge(final Seed peer, final String challenge, final Map<String, String> result, final MultiProtocolURL target) {
-        if (peer == null) return false;
-        if (peer.signatureStatus() == SeedSignature.Status.UNSIGNED) return TrustPolicy.acceptUnsignedSeeds();
-        final String observed = result.get("challengeFor");
-        if (!SeedSignature.checkChallenge(peer, challenge, observed, result.get("challengeSig"))) {
-            Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " did not prove the ownership of its key");
-            return false;
-        }
-        if (!observedIsMine(observed, target, peer.hash)) {
-            Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " answered a request from " + observed + ", not from this peer");
-            return false;
-        }
-        // the owner of the key answers at this address (through a tunnel, libp2p authenticates the key anyway)
-        if (!P2PRoute.isRouted(target)) ProvenAddresses.prove(peer.hash, resolvedHost(target));
-        return true;
+    /** the outcome of a challenge: {@link #PROVEN} binds the key owner to the address we contacted */
+    enum Answer {
+        /** wrong or missing signature, or the answer was for somebody else */
+        FAILED,
+        /** the key owner answered, but we cannot tell whether it answered us or a peer that relayed our request */
+        UNPROVEN,
+        /** the key owner answered a request that came from our address, at the address we contacted */
+        PROVEN
     }
 
     /**
-     * Addresses that peers with verified keys reported for us although they are not among our known addresses:
-     * observed address -> peers. When our public address changes, every partner reports the new one; after
-     * {@link #ADDRESS_CHANGE_QUORUM} independent peers agree, we accept it (otherwise no hello could ever succeed
-     * again, and our own address would never be corrected).
+     * A signed seed must prove, with the answer to our challenge, that the peer we reached owns its key, and that it
+     * answered a request that came from us (not one that another peer forwarded to it).
+     * Unsigned seeds (only accepted with trust.seed.acceptUnsigned=true) cannot prove anything.
      */
-    private static final Map<String, Set<String>> unknownObserved = new ConcurrentHashMap<>();
-    static final int ADDRESS_CHANGE_QUORUM = 3;
+    static Answer answeredChallenge(final Seed peer, final String challenge, final Map<String, String> result, final MultiProtocolURL target) {
+        if (peer == null) return Answer.FAILED;
+        if (peer.signatureStatus() == SeedSignature.Status.UNSIGNED) return TrustPolicy.acceptUnsignedSeeds() ? Answer.UNPROVEN : Answer.FAILED;
+        final String observed = result.get("challengeFor");
+        if (!SeedSignature.checkChallenge(peer, challenge, observed, result.get("challengeSig"))) {
+            Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " did not prove the ownership of its key");
+            return Answer.FAILED;
+        }
+        final Answer answer = observedIsMine(observed, target);
+        if (answer == Answer.FAILED) {
+            Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " answered a request from " + observed + ", not from this peer");
+            return Answer.FAILED;
+        }
+        // the owner of the key answers at this address (through a tunnel, libp2p authenticates the key anyway)
+        if (answer == Answer.PROVEN && !P2PRoute.isRouted(target)) ProvenAddresses.prove(peer.hash, resolvedHost(target));
+        return answer;
+    }
 
     /**
-     * @return true if the address the other peer saw the request coming from is ours. Through a sidecar tunnel it must
-     *         be the sidecar marker. A peer that others cannot reach directly (junior, relayed, leecher) may not
-     *         know its public address behind the NAT and accepts any address.
+     * Whether the address the other peer saw the request coming from is ours. Through a sidecar tunnel it must be the
+     * sidecar marker, and libp2p has authenticated the peer. Otherwise it must be one of our known addresses: then the
+     * answer is {@link Answer#PROVEN}. A peer that does not know its public address (behind a NAT, just started, or
+     * after its address changed) cannot tell a relayed request from its own and gets {@link Answer#UNPROVEN}: the
+     * contact counts, but it proves no address (a relaying attacker must not be able to claim a trusted peer's key for
+     * its own address). Our own address is corrected by the "yourip" field of hello answers as before.
      */
-    static boolean observedIsMine(final String observed, final MultiProtocolURL target, final String peerHash) {
-        if (P2PRoute.isRouted(target)) return SeedSignature.OBSERVED_SIDECAR.equals(observed);
-        if (SeedSignature.OBSERVED_SIDECAR.equals(observed)) return false;
+    static Answer observedIsMine(final String observed, final MultiProtocolURL target) {
+        if (P2PRoute.isRouted(target)) return SeedSignature.OBSERVED_SIDECAR.equals(observed) ? Answer.PROVEN : Answer.FAILED;
+        if (SeedSignature.OBSERVED_SIDECAR.equals(observed)) return Answer.FAILED;
         final Switchboard sb = Switchboard.getSwitchboard();
-        if (sb == null || sb.peers == null || !sb.peers.mySeedIsDefined()) return true;
+        if (sb == null || sb.peers == null || !sb.peers.mySeedIsDefined()) return Answer.UNPROVEN;
         final Seed my = sb.peers.mySeed();
         final Set<String> mine = new HashSet<>(my.getIPs());
         mine.addAll(sb.myPublicIPs());
-        for (final String ip : mine) if (sameAddress(ip, observed)) return true;
-        if (Domains.isLocalhost(observed)) return Domains.isLocalhost(target.getHost());
-        if (!(my.isSenior() || my.isPrincipal()) || !Seed.REACH_DIRECT.equals(my.getReach())) return true;
-        if (observed == null || !com.google.common.net.InetAddresses.isInetAddress(observed.replace("[", "").replace("]", ""))) return false;
-        if (unknownObserved.size() > 1000) unknownObserved.clear();
-        final Set<String> reporters = unknownObserved.computeIfAbsent(observed, k -> ConcurrentHashMap.newKeySet());
-        if (peerHash != null) reporters.add(peerHash);
-        return reporters.size() >= ADDRESS_CHANGE_QUORUM;
+        for (final String ip : mine) if (sameAddress(ip, observed)) return Answer.PROVEN;
+        if (Domains.isLocalhost(observed)) return Domains.isLocalhost(target.getHost()) ? Answer.PROVEN : Answer.FAILED;
+        return Answer.UNPROVEN;
     }
 
     private static boolean sameAddress(final String a, final String b) {
@@ -481,7 +486,8 @@ public final class Protocol {
             //ConcurrentLog.info("**hello-DEBUG**queryRWICount**", "received RESPONSE from requesting " + targetBaseURL + " : response = " + resp);
             if (resp == null) return new long[] {-1, -1};
             // the back-ping of hello: only an address where the owner of the seed's key answers counts
-            if (!answeredChallenge(target, challenge, result, targetBaseURL)) return new long[] {-1, -1};
+            // (an answer we cannot bind to our address does not count: another peer may have relayed it)
+            if (answeredChallenge(target, challenge, result, targetBaseURL) != Answer.PROVEN) return new long[] {-1, -1};
             String magic = result.get("magic");
             if (magic == null) magic = "0";
             try {

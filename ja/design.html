@@ -55,7 +55,7 @@
 <ul>
   <li><code>Sig</code> = Ed25519（<code>"yacy-seed-v1\n" + "Hash=&lt;hash&gt;\n"</code> の後に、値のある残りの中核項目をキーの辞書順（<code>BDate, Name, P2PA, PK, Port, PortSSL, RDS, Reach, SigT, Tags</code>）に <code>k=v\n</code> で連結したもの）。</li>
   <li><code>PK</code> のある seed は <code>Hash == H(PK)</code> と <code>Sig</code> が正しくなければ必ず拒否する。<code>PK</code> の無い seed は <code>trust.seed.acceptUnsigned=true</code> でない限り拒否する。</li>
-  <li>中核が変わったか前の署名から 7 日経ったら署名し直す。まだ知らないピアの seed は、<code>SigT</code> が 30 日より古いか 1 時間以上未来なら拒否する。署名付きで知っているピアの seed を、より古い seed や署名の無い seed で置き換えない。</li>
+  <li>中核が変わったか前の署名から 7 日経ったら署名し直す。<code>SigT</code> が 1 時間以上未来の seed は拒否し、まだ知らないピアの seed は 30 日より古いものも拒否する。署名の対象の値に制御文字（1 つの欄を 2 つに見せる改行など）があれば無効。署名付きで知っているピアの seed を、より古い seed や署名の無い seed で置き換えない。</li>
 </ul>
 
 <h3>2.2 hello のチャレンジ</h3>
@@ -64,7 +64,9 @@
   <li>呼び出し側は乱数の <code>challenge</code> を送る。応答側は、要求が届いた相手のアドレス（<code>challengeFor</code>、sidecar 経由なら <code>p2p</code>）と <code>Sign("yacy-hello-v2|" + challenge + "|" + 自分の hash + "|" + challengeFor)</code> を返す。</li>
   <li>呼び出し側は、返ってきた seed の <code>PK</code> で署名を検証し、<code>challengeFor</code> が自分のアドレスであることを確かめる。アドレスを含めるのは、攻撃者がチャレンジを本物のピアへ転送してその答えを返す攻撃を防ぐため。本物のピアは「攻撃者から来た要求」に署名するので見分けられる。</li>
   <li>応答側が呼び出し元へ接続し直して到達性を確かめる back-ping でも同じチャレンジを使う。他人の IP を名乗った seed はこれで弾かれる。</li>
-  <li>自分の公開アドレスを知らないピア（junior、NAT の内側のピア）はアドレスの照合を省く。転送攻撃が残るのはこの場合だけ。</li>
+  <li>呼び出し側の「自分のアドレス」は、インターフェースのアドレス、設定した固定 IP、そして 3 つの異なる鍵のピアが 2 つ以上の異なる網（/24、IPv6 は /48、私設アドレスはアドレスそのもの）で 6 時間以内に一致して報告したアドレスだけ（<code>OwnAddresses</code>。IPv4 と IPv6 の両方を覚える）。自分の seed の IP は使わない。署名の無い 1 つの答えの <code>yourip</code> で書き換わるので、中継した攻撃者が自分のアドレスを「自分のもの」と思わせられるため。答えの判定は、その <code>yourip</code> を反映する前に 1 回だけ行う。</li>
+  <li><code>challengeFor</code> が呼び出し側の自分のアドレスでないとき（NAT の内側、起動直後、アドレスが変わった直後）は、転送された答えと見分けられない。この場合も接続としては数えるが、アドレスの証明にしない。相手の IP は知っているものを保ち、その答えを「その住所の鍵の持ち主から」とは扱わない（署名の対象外の snippet は捨てる）。back-ping は自分の住所に結び付いた答えだけを成功とする（署名の無い seed は、<code>trust.seed.acceptUnsigned=true</code> のときは以前どおり通す。証明できるものが無いので）。</li>
+  <li>署名付きで知っているピアの住所が変わるのは、back-ping 付きの hello だけ。検索要求（<code>/yacy/search</code>）に付いた seed は誰でも送れるので、住所を動かさない。</li>
 </ul>
 
 <h2 id="lists">3. 信頼の委譲と一覧</h2>
@@ -103,16 +105,18 @@
 
 <h2 id="distribution">4. 一覧の配り方</h2>
 <ul>
-  <li>各ピアは受け取った封筒を検証して <code>DATA/SETTINGS/trust-bundle.json</code> に保存し、<code>/yacy/trust.json</code> で公開する。誰が中継してもよい。</li>
-  <li>seed に <code>TV</code> を載せる。コーディネータごとに、持っている封筒の版の<em>合計</em>（委任書と一覧。失効したオペレータの分も数える）。新しい封筒はどれも合計を増やし、失効でも合計は減らない。</li>
-  <li>peer ping のたびに、接続中のピアの <code>TV</code> が自分より大きければ、そのピアの <code>/yacy/trust.json</code> を取って統合する。<code>TV</code> は署名されていないので、問い合わせ先は乱数順に選び、新しいものを返さなかったピアには 10 分間問い合わせない。</li>
+  <li>各ピアは受け取った封筒を検証して <code>DATA/SETTINGS/trust-bundle.json</code> に保存し、<code>/yacy/trust.json</code> で公開する。保存するのは、設定したコーディネータとその委任先の封筒（自分の網のもの）だけ。コーディネータの無いピアは何も保存せず、中継もしない。</li>
+  <li>seed に <code>TV</code> を載せる。コーディネータごとに 2 つの版の<em>合計</em>: コーディネータ自身が署名したもの（委任書と自身の一覧）と、委任先オペレータの一覧（失効したオペレータの分も数える）。新しい封筒はどちらかを増やし、失効でも減らない。</li>
+  <li>peer ping のたびに、署名付きの seed を持つ接続中のピアの <code>TV</code> が自分より新しければ（コーディネータ分が大きい、または等しくてオペレータ分が大きい）、そのピアの <code>/yacy/trust.json</code> を取って統合する（1 回に最大 3 ピア）。コーディネータ分を先に比べるので、オペレータの一覧の版を水増ししたピアにも失効が届く。<code>TV</code> は署名されていないので、問い合わせ先は乱数順に選び、新しいものを返さなかったピアには 10 分間問い合わせない。</li>
+  <li>受け付ける版は現在の Unix 時刻 + 1 日まで（最大 2<sup>40</sup>）。巨大な版で以後の更新を止められないようにするため。版には Unix 時刻か小さな連番を使う。上限は新しく受け取る文にだけ当て、起動時に自分のファイルから読む文には当てない（時計が戻っても一覧を失わない）。</li>
+  <li>コーディネータ自身の一覧に載るピアは、その項目の優先度とタグで決まる。同じコーディネータの下のオペレータの一覧どうしで同じピアを載せたときは、タグの和集合と最小の優先度をとる（あるオペレータが別のオペレータの <code>ads</code> を消せず、コーディネータが選んだピアにタグを付けることもできない）。</li>
   <li><code>trust.bundle.urls</code> からも、起動時・10 分ごと・設定が変わったときに取る。新しい版の存在を複数の経路で知ることで、古い版に留め置く攻撃をしにくくする。</li>
 </ul>
 
 <h2 id="provenance">5. 文書の出所（作者の署名）</h2>
 <ul>
   <li>ピアは crawl した頁を索引するときに署名する。値は Solr の <code>provenance_s</code> に入り、DHT の転送や単語索引の結果ではプロパティ <code>prov</code> で運ばれる: <code>1|&lt;作者の鍵&gt;|&lt;署名&gt;|&lt;単語の Bloom フィルタ&gt;</code>。</li>
-  <li>署名の対象: <code>"yacy-doc-v1\n" + 正規化した URL + "\n" + タイトル + "\n" + Bloom</code>。Bloom フィルタには、単語索引に入るのと同じ、その文書の単語の hash を入れる。大きさは 1 語あたり 12 bit 以上の最小の 2 の冪（512〜32768 bit）、ハッシュ関数は 4 個。</li>
+  <li>署名の対象: <code>"yacy-doc-v1\n" + 正規化した URL + "\n" + タイトル + "\n" + Bloom</code>。Bloom フィルタには、単語索引に入るのと同じ、その文書の単語の hash を入れる。大きさは 1 語あたり 12 bit 以上の最小の 2 の冪（512〜65536 bit）、ハッシュ関数は 4 個。他の作者の単語索引の結果では、含まれない語がたまたま一致する確率（埋まり具合<sup>4 × クエリの語数</sup>）が 1/16 以下のときだけ、フィルタが語を保証するとみなす（半分埋まったフィルタなら 1 語、71% なら 2 語から）。65536 bit は約 11,000 語で半分埋まる。</li>
 </ul>
 <div class="tablewrap"><table>
 <thead><tr><th>判定</th><th>条件</th><th>既定の扱い</th></tr></thead>
@@ -124,8 +128,8 @@
 <tr><td><code>INVALID</code></td><td>署名が合わない、鍵と作者が合わない、URL かタイトルが変わっている</td><td><strong>必ず捨てる</strong></td></tr>
 </tbody></table></div>
 <ul>
-  <li>単語索引の結果は、クエリのすべての語が Bloom フィルタに入っていることも求める。保存ピアが信頼された文書を無関係な語に結び付けるのを防ぐため。</li>
-  <li>要約（snippet）・本文・説明・見出し・画像の代替テキストは署名の対象外。応答したピアが作者か、住所を確かめた信頼ピアのときだけ残す。他ピアの結果を自ピアの索引に保存する（<code>remotesearch.result.store</code>）のは、応答したピアが信頼された作者のときだけ。</li>
+  <li>単語索引の結果は、クエリのすべての語が Bloom フィルタに入っていることも求める。保存ピアが信頼された文書を無関係な語に結び付けるのを防ぐため。クエリの語数に対して埋まりすぎた他の作者の Bloom フィルタ（上を参照）は、単語索引の結果には使わない（その文書も Solr からは見つかる）。</li>
+  <li>要約（snippet）・本文・説明・見出し・画像の代替テキストは署名の対象外。応答したピアが作者か、住所を確かめた信頼ピアのときだけ残す。そうでなければ、順位に効く署名の対象外の値（語数・サイズ・鮮度の日付）も捨て、語数の無い結果は薄い頁の閾値の半分の語数として重みを付ける。他ピアの結果を自ピアの索引に保存する（<code>remotesearch.result.store</code>）のは、応答したピアが信頼された作者のときだけ。</li>
   <li>DHT の保存（<code>transferURL</code>）は <code>INVALID</code> を拒否し、<code>UNSIGNED</code> は開放モードでだけ受け入れる。保存ピアは作者を信頼しなくてよい。</li>
 </ul>
 
@@ -140,7 +144,12 @@
   <li><strong>sidecar</strong>（<code>sidecar/</code>、Go、go-libp2p）: YaCy と同じ鍵で libp2p のホストを立てる。外から届かなければ、設定された circuit relay v2 に予約を取り、DCUtR を試みる。</li>
   <li><strong>トンネル。</strong>YaCy が制御 API に <code>GET /tunnel/&lt;libp2p ピア ID&gt;?addrs=…</code> を送ると、ローカルのポートが返る。<code>127.0.0.1:port</code> への普通の HTTP は、libp2p のストリーム（<code>/yacy/http/1.0.0</code>）で相手の sidecar へ運ばれる。普通のホスト:ポートなので、YaCy のプロトコルや Solr のクライアントはそのまま動く。</li>
   <li>受け側の sidecar は <code>/yacy/*</code> と Solr の select だけを YaCy の専用の接続口（<code>127.0.0.1:8096</code>）へ渡す。管理画面は通さず、送信元を名乗るヘッダーは取り除く。接続口は送信元アドレスを libp2p のピア ID から作った <code>2001:db8::/32</code> のアドレスに置き換える。トンネル経由の要求にループバックの特権を与えず、負荷制限をピアごとに効かせるため。ピア ID のヘッダーは、sidecar のトークンが一緒に来たときだけ信じる。</li>
-  <li>制御 API は、YaCy が <code>DATA/SETTINGS/sidecar.token</code> に書いたトークン、ループバックの Host、<code>Origin</code> が無いことを求める（他のローカルのプロセスや DNS rebinding への対策）。上限はトンネル 256 本、15 分使われなければ閉じる、相手ごとの同時要求 8 本、1 要求 60 秒・32 MiB。</li>
+  <li>制御 API は、ループバックの Host と <code>Origin</code> が無いことを求める（DNS rebinding への対策）。<code>/tunnel</code> は YaCy が <code>DATA/SETTINGS/sidecar.token</code>（作成時から所有者だけが読め、一時ファイルに書いて名前を変える）に書いたトークンで認証するが、トークンそのものは送らない。YaCy は nonce（<code>&lt;Unix ミリ秒&gt;.&lt;乱数&gt;</code>、2 分以内に 1 回だけ有効）と <code>HMAC-SHA256(トークン, "yacy-sidecar-req-v1|" + 方法 + "|" + パス + "|" + nonce)</code> を送る。sidecar の停止中にポートを取ったプロセスは、使えるものを何も得られない。</li>
+  <li>YaCy は peer ping のたびに <code>/status?nonce=…</code> を問い合わせ、nonce・ピア ID・起動 ID・到達性・リレーのアドレスに peer key で署名した sidecar だけを使う。<code>/tunnel</code> の答え（nonce・相手・ポート・起動 ID）にも署名があり、YaCy は自分の sidecar が渡したポートだけを使う。</li>
+  <li>sidecar は YaCy の接続口に 3 分届かなければ終了する（<code>-yacy-watchdog</code>）。Docker で YaCy とネットワーク名前空間を共有していると、YaCy の再起動後も古い名前空間に残るため。</li>
+  <li>上限: トンネル 256 本、15 分使われなければ閉じる。閉じたトンネルはポートを 10 分保ち（YaCy がポートを覚えている時間より長く）、そうしたポートが 256 本になったら、ポートを早く手放す代わりに新しいトンネルを断る。同時要求は相手ごとに 8 本・全体で 64 本。1 要求 60 秒、応答 32 MiB。要求の本文は索引の転送だけ 32 MiB、それ以外は 1 MiB。</li>
+  <li>seed の回線アドレスからはリレーのピア ID だけを採り、接続先は設定したリレー自身のアドレスから組み立て直す。seed で内部のホストへ接続させることはできない。その代わり、この sidecar が知らないリレーに予約したピアには届かない。</li>
+  <li>リレーの sidecar は <code>-relay-allow &lt;ファイル&gt;</code> か、意図して <code>-relay-open</code> を付けて起動する（開いたリレーはどの libp2p の通信も運ぶ）。</li>
   <li>YaCy は、AutoNAT が「private」と判定したとき、または判定が出ないまま 3 回続けて他ピアから junior と報告されたとき、seed を <code>Reach=relay</code> にして回線のアドレスを <code>P2PA</code> に載せる。AutoNAT が「public」と判定するまでその状態を保つ。<code>p2p.mode=leecher</code> は <code>Reach=none</code>。</li>
   <li>リレー経由のピアは既定で検索に応答するだけ。<code>p2p.relay.dhtStorage=true</code>（seed の <code>RDS=1</code>）を宣言しない限り、DHT の保存先にも DHT 検索先にもならない。</li>
   <li>sidecar 経由の hello は、seed の鍵の libp2p の身元から来ていなければならない。向きはどちらでもよい。NAT の内側のピアがリレー経由で外へ呼ぶ場合も、公開側のピアがトンネルで NAT の内側のピアを呼ぶ場合もある。</li>
@@ -168,9 +177,13 @@
 <h2 id="limits">8. 既知の制約</h2>
 <ul>
   <li>日本語・中国語の単語 hash は旧網と異なる（bigram のため）。開放モードでも旧網の CJK の索引とは突き合わない。</li>
-  <li>とても長い文書（約 2700 語超）の Bloom フィルタは偽陽性が増え、単語索引の結果の語の確認が甘くなる。</li>
+  <li>とても長い文書の Bloom フィルタは埋まる。偶然の一致が 1/16 を超える場合（約 11,000 語を超える文書への 1 語のクエリなど）、他の作者の単語索引の結果は使わない。そうした文書は Solr からか、語の多いクエリで見つかる。以前のフォーク版は大きなフィルタを <code>INVALID</code> として捨てるので、フォークのピアは同時に更新する。</li>
+  <li><code>OwnAddresses</code> は 3 つの鍵と 2 つの網からの報告を求める。2 つの網にアドレスを持ち鍵を 3 つ作った攻撃者は、中継したアドレスを自分のものと思わせられる。ピアや網が少ない網では固定 IP を設定する。</li>
+  <li><code>TV</code> の形式（2 つの和）は以前のフォーク版と互換でない。混在の間、信頼の文は <code>trust.bundle.urls</code> からだけ広がる。CJK の分割はすべての語に NFKC を当てるので、全角・半角の文字を含む頁は索引し直すまで以前の語で残る。</li>
   <li>第三者から中継された seed の IP は、自分で hello するまで確かめられていない。</li>
-  <li>応答そのものには署名が無い。信頼ピアになりすませた相手は、署名の対象外の部分（snippet）を差し替えられる。アドレスを含めたチャレンジで防いでいるが、自分の公開アドレスを知らないピアは例外。</li>
+  <li>応答そのものには署名が無い。署名の対象外の部分（snippet）は、作者か、チャレンジで住所を確かめた信頼ピアからのものだけを残す。</li>
+  <li>sidecar 経由で届くのは、この sidecar に設定したリレーに予約したピアだけ。</li>
+  <li>同じホストの別のユーザーは 127.0.0.1 のトンネルのポートを見つけて、このピアの libp2p の身元で要求を送れる。sidecar の停止中にトンネルのポートを取ったプロセスは、YaCy が聞き直すまで（最大 5 分）その相手として答えられる。ピア ID は費用なしで作れるので、多数の ID の遅い要求で全体 64 本の枠を埋められる。共用のホストでは YaCy と sidecar を専用のユーザーかコンテナで動かす。upstream の既定 <code>adminAccountForLocalhost=true</code> ではローカルのプロセスがすべて管理者になる（フォークの Docker イメージは false）。</li>
   <li>信頼された作者が虚偽の内容に署名すること、保存ピアが結果を返さないことは防げない。</li>
 </ul>
 </main>

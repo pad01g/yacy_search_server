@@ -51,7 +51,7 @@
 <div class="cards">
   <div class="card"><h3>Ranking</h3><p>Stricter minimum match, term coverage weighting after per-peer normalization, a weight against thin pages, and searching all peers of small networks.</p></div>
   <div class="card"><h3>CJK</h3><p>Chinese, Japanese and Korean text is indexed and searched as overlapping bigrams, in Solr and in the word index.</p></div>
-  <div class="card"><h3>Trust</h3><p>Ed25519 peer keys, signed seeds, coordinator-signed trust lists with declared tags, and an author signature on every document.</p></div>
+  <div class="card"><h3>Trust</h3><p>Ed25519 peer keys, signed seeds, coordinator-signed trust lists with declared tags, and an author signature on every document the peer crawls.</p></div>
   <div class="card"><h3>NAT traversal</h3><p>A small go-libp2p sidecar reserves a slot on a circuit relay, so peers behind a NAT answer searches.</p></div>
 </div>
 
@@ -60,18 +60,18 @@
 <thead><tr><th>Symptom</th><th>Cause</th><th>Change</th></tr></thead>
 <tbody>
 <tr><td>Pages that match one term (keyword stuffing) rank on top</td><td>Solr <code>mm=1</code> for multi-term queries</td><td>Minimum match <code>2&lt;-1 5&lt;80%</code>: two terms must both match, 3–5 terms may miss one (<code>search.ranking.solr.mm</code>, <code>.mm.cjk</code>)</td></tr>
-<tr><td>A peer's best partial match ranks like other peers' exact matches</td><td>Per-peer score normalization</td><td>Multiply the normalized score by (terms found / query terms)² (<code>search.ranking.coverage.exponent</code>)</td></tr>
+<tr><td>A peer's best partial match ranks like other peers' exact matches</td><td>Per-peer score normalization</td><td>Multiply the normalized score by (terms found / query terms)², at least 0.05, and never below what the minimum match guarantees (<code>search.ranking.coverage.exponent</code>)</td></tr>
 <tr><td>Japanese / Chinese not found in the word index</td><td>No word segmentation for CJK</td><td>Overlapping bigrams in the word index and the query; <code>CJKWidthFilter</code> + <code>CJKBigramFilter</code> in the Solr schema</td></tr>
-<tr><td>Thin pages with the whole query in the title (tag lists) rank on top</td><td><code>qf</code> weighs title^15 and h1^11 against text^1</td><td>Results with fewer than 100 words are weighted by words / 100 (<code>search.ranking.thin.words</code>); CJK word counts fixed (they counted spaces)</td></tr>
+<tr><td>Thin pages with the whole query in the title (tag lists) rank on top</td><td>The default <code>qf</code> weighs title^5 and h1^5 (and host ^6, URL file name ^4, path ^3) against text^1</td><td>Results with fewer than 100 words are weighted by words / 100, at least 0.1 (<code>search.ranking.thin.words</code>); CJK word counts fixed (they counted spaces)</td></tr>
 <tr><td>A network of new peers never searches other peers' word indexes</td><td>DHT search needs peers older than 3 days</td><td>Configurable (<code>remotesearch.dht.minage</code>, default 3)</td></tr>
-<tr><td>Small networks send remote Solr queries to nobody, or skip DHT targets</td><td>Target count formula gives 0; DHT targets were excluded from Solr</td><td>Networks of up to 32 peers ask every connected peer, DHT targets included</td></tr>
+<tr><td>Small networks send remote Solr queries to nobody, or skip DHT targets</td><td>Target count formula gives 0; DHT targets were excluded from Solr</td><td>Networks of up to 32 peers ask every connected trusted peer (every peer in open mode), DHT targets included</td></tr>
 </tbody></table></div>
 
 <h3>Trust layer</h3>
 <ul>
   <li><strong>Peer identity.</strong> Each peer has an Ed25519 key. Its 12-character peer hash is derived from the public key, and the core of its seed (name, ports, key, reachability, declared tags) is signed. Unsigned seeds are rejected by default. A hello challenge proves that the key owner answers at an address.</li>
   <li><strong>Trust lists.</strong> Users configure coordinator keys. A coordinator delegates to operators, and operators sign lists of trusted peers with a priority and declared tags such as <code>ads</code> or <code>proxy:&lt;engine&gt;</code>. Lists are versioned instead of expiring and spread from peer to peer.</li>
-  <li><strong>Author signatures.</strong> The peer that crawls a page signs its URL, title and a Bloom filter of its words. By default a result is shown only if its signature is valid and its author is in the trust set. A peer storing a document for the DHT cannot forge it. It can only withhold it.</li>
+  <li><strong>Author signatures.</strong> The peer that crawls a page signs its URL, title and a Bloom filter of its words. By default a result is shown only if its signature is valid and its author is in the trust set (exceptions: unsigned documents in the peer's own index that did not come through the DHT count as its own, and results of external search engines are marked "external"). A peer storing a document for the DHT cannot forge it. It can only withhold it.</li>
   <li><strong>Open mode.</strong> Unsigned or untrusted results can be shown, labelled "unverified" and always ranked below verified ones. Results with a forged signature are never shown.</li>
 </ul>
 
@@ -88,7 +88,7 @@
 <thead><tr><th>Cluster / path</th><th class="num">R-precision ↑</th><th class="num">Recall@10 ↑</th><th class="num">Decoys in top R ↓</th><th class="num">All terms in top 10 ↑</th></tr></thead>
 <tbody>
 <tr><td>upstream, default</td><td class="num">0.52</td><td class="num">0.96</td><td class="num">0.48</td><td class="num">0.42</td></tr>
-<tr class="fork"><td>fork, default</td><td class="num">0.84–0.88</td><td class="num">1.00</td><td class="num">0.12–0.16</td><td class="num">0.75</td></tr>
+<tr class="fork"><td>fork, default</td><td class="num">0.79–0.86</td><td class="num">1.00</td><td class="num">0.14–0.21</td><td class="num">0.75</td></tr>
 <tr><td>upstream, word index only</td><td class="num">0.02</td><td class="num">0.02</td><td class="num">0.00</td><td class="num">0.09</td></tr>
 <tr class="fork"><td>fork, word index only</td><td class="num">0.93</td><td class="num">0.95</td><td class="num">0.07</td><td class="num">0.77</td></tr>
 </tbody></table></div>
@@ -130,7 +130,7 @@ docker compose -f compose.demo.yaml -p yacydemo up -d
 <h2 id="agents">For AI agents</h2>
 <p>An agent can run its own peer and use it as a search tool, without a search API or API key:</p>
 <ul>
-  <li><strong>MCP server</strong> (<code>io.github.pad01g/yacy-search</code>): <code>docker run -i --rm -e YACY_URL=http://host.docker.internal:8090 -e YACY_ADMIN_PASSWORD=yacy ghcr.io/pad01g/yacy-search-mcp:0.1.0</code>. Tools: <code>search</code>, <code>crawl</code>, <code>index_status</code>, <code>peers</code>, <code>get_ranking_settings</code>, <code>set_ranking_setting</code>, <code>evaluate_ranking</code>, <code>trust_status</code>. It runs next to the agent and talks to the agent's own peer; there is no central service.</li>
+  <li><strong>MCP server</strong> (<code>io.github.pad01g/yacy-search</code>): <code>docker run -i --rm --network yacy -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD=&lt;your password&gt; ghcr.io/pad01g/yacy-search-mcp:0.2.0</code> (with the peer started as <code>docker run -d --name yacy --network yacy -p 127.0.0.1:8090:8090 -v yacy_data:/opt/yacy_search_server/DATA ghcr.io/pad01g/yacy-improved-search:latest</code>; change the default password <code>yacy</code> first). Tools: <code>search</code>, <code>crawl</code>, <code>index_status</code>, <code>peers</code>, <code>get_ranking_settings</code>, <code>set_ranking_setting</code>, <code>evaluate_ranking</code>, <code>trust_status</code>. It runs next to the agent and talks to the agent's own peer; there is no central service.</li>
   <li><strong>Agent skill</strong>: <code>npx skills add pad01g/yacy-lab</code> installs <a href="https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md">yacy-p2p-search</a> (start a peer, crawl, search, evaluate and tune ranking).</li>
   <li><strong>Trust registry</strong>: <a href="https://github.com/pad01g/yacy-trust">pad01g/yacy-trust</a>. A merged pull request lists your peer or makes you an operator who vouches for peers.</li>
   <li>Machine-readable summary: <a href="llms.txt">llms.txt</a>.</li>

@@ -51,7 +51,7 @@
 <div class="cards">
   <div class="card"><h3>順位付け</h3><p>厳しめの minimum match、ピアごとの正規化の後に掛ける語の被覆率の重み、本文の薄い頁の減点、小さな網での全ピアへの問い合わせ。</p></div>
   <div class="card"><h3>日本語・中国語</h3><p>CJK の文字列を重なりのある 2 文字（bigram）として、Solr でも単語索引でも索引・検索する。</p></div>
-  <div class="card"><h3>信頼</h3><p>Ed25519 のピアの鍵、署名付きの seed、宣言タグ付きでコーディネータが署名する信頼の一覧、全文書への作者の署名。</p></div>
+  <div class="card"><h3>信頼</h3><p>Ed25519 のピアの鍵、署名付きの seed、宣言タグ付きでコーディネータが署名する信頼の一覧、ピアが crawl した全文書への作者の署名。</p></div>
   <div class="card"><h3>NAT 越え</h3><p>go-libp2p の小さな sidecar が circuit relay に予約を取り、NAT の内側のピアも検索に応答できる。</p></div>
 </div>
 
@@ -60,18 +60,18 @@
 <thead><tr><th>症状</th><th>原因</th><th>変更</th></tr></thead>
 <tbody>
 <tr><td>1 語だけ一致する頁（キーワードの詰め込み）が上位に来る</td><td>2 語以上のクエリに Solr の <code>mm=1</code></td><td>minimum match <code>2&lt;-1 5&lt;80%</code>: 2 語は両方必須、3〜5 語は 1 語の欠けを許す（<code>search.ranking.solr.mm</code>, <code>.mm.cjk</code>）</td></tr>
-<tr><td>あるピアの部分一致の 1 位が、他ピアの完全一致と同じ順位になる</td><td>ピアごとの点数の正規化</td><td>正規化後の点数に（見つかった語 / クエリの語）² を掛ける（<code>search.ranking.coverage.exponent</code>）</td></tr>
+<tr><td>あるピアの部分一致の 1 位が、他ピアの完全一致と同じ順位になる</td><td>ピアごとの点数の正規化</td><td>正規化後の点数に（見つかった語 / クエリの語）² を掛ける。下限は 0.05 で、minimum match が保証する割合より下げない（<code>search.ranking.coverage.exponent</code>）</td></tr>
 <tr><td>日本語・中国語が単語索引で引けない</td><td>CJK の分かち書きが無い</td><td>単語索引とクエリで重なりのある bigram に分ける。Solr の schema に <code>CJKWidthFilter</code> + <code>CJKBigramFilter</code></td></tr>
-<tr><td>クエリ全体をタイトルに持つ本文の薄い頁（タグ一覧）が上位に来る</td><td><code>qf</code> が title^15・h1^11 に対して本文 ^1</td><td>本文が 100 語未満の結果に 語数 / 100 の重みを掛ける（<code>search.ranking.thin.words</code>）。CJK の語数の数え方を修正（空白の数を数えていた）</td></tr>
+<tr><td>クエリ全体をタイトルに持つ本文の薄い頁（タグ一覧）が上位に来る</td><td><code>qf</code> が title^5・h1^5（ほかに host ^6、URL のファイル名 ^4、パス ^3） に対して本文 ^1</td><td>本文が 100 語未満の結果に 語数 / 100 の重み（下限 0.1）を掛ける（<code>search.ranking.thin.words</code>）。CJK の語数の数え方を修正（空白の数を数えていた）</td></tr>
 <tr><td>新しいピアだけの網で、他ピアの単語索引を検索しない</td><td>DHT 検索は 3 日以上のピアだけ</td><td>設定可能に（<code>remotesearch.dht.minage</code>、既定 3）</td></tr>
-<tr><td>小さな網で remote Solr 検索がどこにも飛ばない、DHT 検索先を外す</td><td>送り先数の式が 0 になる。DHT 検索先は Solr の問い合わせ先から外していた</td><td>32 ピア以下の網では、DHT 検索先も含めて接続中の全ピアに問い合わせる</td></tr>
+<tr><td>小さな網で remote Solr 検索がどこにも飛ばない、DHT 検索先を外す</td><td>送り先数の式が 0 になる。DHT 検索先は Solr の問い合わせ先から外していた</td><td>32 ピア以下の網では、DHT 検索先も含めて接続中の信頼ピア（開放モードでは全ピア）に問い合わせる</td></tr>
 </tbody></table></div>
 
 <h3>信頼の仕組み</h3>
 <ul>
   <li><strong>ピアの身元。</strong>各ピアは Ed25519 の鍵を持つ。12 文字のピア hash は公開鍵から導かれ、seed の中核（名前・ポート・鍵・到達方法・宣言タグ）に署名する。署名の無い seed は既定で受け入れない。hello のチャレンジで、その住所に鍵の持ち主が居ることを確かめる。</li>
   <li><strong>信頼の一覧。</strong>利用者はコーディネータの鍵を設定する。コーディネータはオペレータに委任し、オペレータは信頼するピアの一覧に署名する。一覧の各ピアには優先度と、<code>ads</code>・<code>proxy:&lt;engine&gt;</code> などの宣言タグが付く。一覧は有効期限ではなく版で管理し、ピアからピアへ広がる。</li>
-  <li><strong>作者の署名。</strong>頁を crawl したピアが、その URL・タイトル・単語の Bloom フィルタに署名する。既定では、署名が正しく、作者が信頼集合にいる結果だけを出す。DHT で文書を預かるピアは文書を偽造できず、できるのは返さないことだけ。</li>
+  <li><strong>作者の署名。</strong>頁を crawl したピアが、その URL・タイトル・単語の Bloom フィルタに署名する。既定では、署名が正しく、作者が信頼集合にいる結果だけを出す（例外: 自ピアの索引にある署名の無い文書で DHT で受け取っていないものは自分の文書として扱い、外部の検索エンジンの結果は「external」として示す）。DHT で文書を預かるピアは文書を偽造できず、できるのは返さないことだけ。</li>
   <li><strong>開放モード。</strong>署名の無い結果や信頼集合外の結果も「未検証」の印付きで出せる。未検証の結果は必ず検証済みより下に並ぶ。署名が偽造された結果は出さない。</li>
 </ul>
 
@@ -88,7 +88,7 @@
 <thead><tr><th>クラスタ / 経路</th><th class="num">R-precision ↑</th><th class="num">recall@10 ↑</th><th class="num">上位 R 件の罠 ↓</th><th class="num">上位 10 件で全語を含む ↑</th></tr></thead>
 <tbody>
 <tr><td>本家、既定</td><td class="num">0.52</td><td class="num">0.96</td><td class="num">0.48</td><td class="num">0.42</td></tr>
-<tr class="fork"><td>フォーク、既定</td><td class="num">0.84–0.88</td><td class="num">1.00</td><td class="num">0.12–0.16</td><td class="num">0.75</td></tr>
+<tr class="fork"><td>フォーク、既定</td><td class="num">0.79–0.86</td><td class="num">1.00</td><td class="num">0.14–0.21</td><td class="num">0.75</td></tr>
 <tr><td>本家、単語索引のみ</td><td class="num">0.02</td><td class="num">0.02</td><td class="num">0.00</td><td class="num">0.09</td></tr>
 <tr class="fork"><td>フォーク、単語索引のみ</td><td class="num">0.93</td><td class="num">0.95</td><td class="num">0.07</td><td class="num">0.77</td></tr>
 </tbody></table></div>
@@ -130,7 +130,7 @@ docker compose -f compose.demo.yaml -p yacydemo up -d
 <h2 id="agents">AI エージェント向け</h2>
 <p>エージェントは自分のピアを動かし、検索 API も API キーも無しに検索の道具として使える。</p>
 <ul>
-  <li><strong>MCP サーバー</strong>（<code>io.github.pad01g/yacy-search</code>）: <code>docker run -i --rm -e YACY_URL=http://host.docker.internal:8090 -e YACY_ADMIN_PASSWORD=yacy ghcr.io/pad01g/yacy-search-mcp:0.1.0</code>。tool は <code>search</code>、<code>crawl</code>、<code>index_status</code>、<code>peers</code>、<code>get_ranking_settings</code>、<code>set_ranking_setting</code>、<code>evaluate_ranking</code>、<code>trust_status</code>。エージェントの横で動き、エージェント自身のピアに問い合わせる。中央のサービスは無い。</li>
+  <li><strong>MCP サーバー</strong>（<code>io.github.pad01g/yacy-search</code>）: <code>docker run -i --rm --network yacy -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD=&lt;パスワード&gt; ghcr.io/pad01g/yacy-search-mcp:0.2.0</code> （ピアは <code>docker run -d --name yacy --network yacy -p 127.0.0.1:8090:8090 -v yacy_data:/opt/yacy_search_server/DATA ghcr.io/pad01g/yacy-improved-search:latest</code> で起動しておく。既定のパスワード <code>yacy</code> は先に変える）。tool は <code>search</code>、<code>crawl</code>、<code>index_status</code>、<code>peers</code>、<code>get_ranking_settings</code>、<code>set_ranking_setting</code>、<code>evaluate_ranking</code>、<code>trust_status</code>。エージェントの横で動き、エージェント自身のピアに問い合わせる。中央のサービスは無い。</li>
   <li><strong>スキル</strong>: <code>npx skills add pad01g/yacy-lab</code> で <a href="https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md">yacy-p2p-search</a> が入る（ピアの起動、crawl、検索、順位の評価と調整）。</li>
   <li><strong>信頼の登録簿</strong>: <a href="https://github.com/pad01g/yacy-trust">pad01g/yacy-trust</a>。pull request がマージされると、ピアが一覧に載る、またはピアを保証するオペレータになれる。</li>
   <li>機械向けの要約: <a href="../llms.txt">llms.txt</a>。</li>

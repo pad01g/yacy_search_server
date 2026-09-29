@@ -106,20 +106,21 @@ public final class CJKBigrams {
      * overlapping bigrams of its CJK runs. A CJK run of a single character is kept
      * as a single character token.
      *
-     * Tokens are brought to NFKC (half-width katakana ｶﾀｶﾅ becomes カタカナ, like Solr's CJKWidthFilter). Surrogate
+     * All tokens are brought to NFKC (half-width katakana ｶﾀｶﾅ becomes カタカナ, like Solr's CJKWidthFilter). Surrogate
      * pairs (supplementary Han characters, emoji) separate parts, as in the index, where the sentence reader treats
      * them as invisible; parts without letters or digits are dropped. Index and query both split with this method.
      *
      * @param token a token without white space
-     * @return the parts in their original order; the token itself if it has no CJK characters
+     * @return the parts in their original order; the (normalized) token itself if it has no CJK characters
      */
     public static List<String> split(final String rawToken) {
         final List<String> parts = new ArrayList<>();
-        if (!containsCJK(rawToken)) {
-            parts.add(rawToken);
+        // every token, also one without CJK characters (full-width ＡＢＣ must match abc in ＡＢＣ東京)
+        final String token = isAscii(rawToken) ? rawToken : java.text.Normalizer.normalize(rawToken, java.text.Normalizer.Form.NFKC);
+        if (!containsCJK(token)) {
+            parts.add(token);
             return parts;
         }
-        final String token = java.text.Normalizer.normalize(rawToken, java.text.Normalizer.Form.NFKC);
         int i = 0;
         final int n = token.length();
         while (i < n) {
@@ -141,6 +142,11 @@ public final class CJKBigrams {
             i = j;
         }
         return parts;
+    }
+
+    private static boolean isAscii(final String s) {
+        for (int i = 0; i < s.length(); i++) if (s.charAt(i) >= 0x80) return false;
+        return true;
     }
 
     private static boolean hasLetterOrDigit(final String s) {

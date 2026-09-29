@@ -297,6 +297,13 @@ public class QueryParamsTest {
 		Assert.assertEquals(1, QueryParams.requiredTerms("1", 3));
 		Assert.assertEquals(3, QueryParams.requiredTerms("100%", 3));
 		Assert.assertEquals(3, QueryParams.requiredTerms("garbage", 3));
+		// Solr rejects a mix of simple and conditional parts, and reads conditions in order
+		Assert.assertFalse(QueryParams.isValidMinimumMatch("1 3<80%"));
+		Assert.assertFalse(QueryParams.isValidMinimumMatch("3<80% 1"));
+		Assert.assertEquals(3, QueryParams.requiredTerms("5<80% 2<-1", 3));
+		Assert.assertEquals(5, QueryParams.requiredTerms("5<80% 2<-1", 5));
+		Assert.assertEquals(5, QueryParams.requiredTerms("5<80% 2<-1", 6)); // both conditions apply, the last wins
+		Assert.assertEquals(3, QueryParams.requiredTerms("-25%", 3)); // -0.75 truncates to 0
 	}
 
 	@Test

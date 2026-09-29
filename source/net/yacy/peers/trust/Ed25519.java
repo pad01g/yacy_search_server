@@ -119,10 +119,15 @@ public final class Ed25519 {
         final String pem = "-----BEGIN PRIVATE KEY-----\n"
                 + Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(pair.getPrivate().getEncoded())
                 + "\n-----END PRIVATE KEY-----\n";
+        writePrivateFileAtomic(file, pem.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    /** {@link #writePrivateFile} under a temporary name, then renamed: a reader never sees a partly written file */
+    public static void writePrivateFileAtomic(final File file, final byte[] data) throws IOException {
         final File dir = file.getAbsoluteFile().getParentFile();
         if (dir != null) dir.mkdirs();
         final File tmp = new File(dir, file.getName() + ".tmp");
-        writePrivateFile(tmp, pem.getBytes(StandardCharsets.US_ASCII));
+        writePrivateFile(tmp, data);
         Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 

@@ -89,13 +89,47 @@ public final class P2PRoute {
         final byte[] b = new byte[32];
         new SecureRandom().nextBytes(b);
         token = Ed25519.encode(b);
-        final File dir = file.getAbsoluteFile().getParentFile();
-        if (dir != null) dir.mkdirs();
-        Ed25519.writePrivateFile(file, token.getBytes(StandardCharsets.US_ASCII));
+        // the sidecar may read the file at any moment: it must never see it empty
+        Ed25519.writePrivateFileAtomic(file, token.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    /** for tests */
+    static void setToken(final String t) {
+        token = t;
     }
 
     static String token() {
         return token == null ? "" : token;
+    }
+
+    /** header of control requests: HMAC-SHA256 with the token over {@link #requestMessage} */
+    public static final String AUTH_HEADER = "X-YaCy-Sidecar-Auth";
+
+    private static final SecureRandom NONCES = new SecureRandom();
+
+    /** "<unix milliseconds>.<random>": the sidecar accepts it within two minutes of its time, once */
+    static String newNonce() {
+        final byte[] b = new byte[16];
+        NONCES.nextBytes(b);
+        return System.currentTimeMillis() + "." + Ed25519.encode(b);
+    }
+
+    static String requestMessage(final String method, final String path, final String nonce) {
+        return "yacy-sidecar-req-v1|" + method + "|" + path + "|" + nonce;
+    }
+
+    static String requestMAC(final String method, final String path, final String nonce) {
+        try {
+            final javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(token().getBytes(StandardCharsets.US_ASCII), "HmacSHA256"));
+            return Ed25519.encode(mac.doFinal(requestMessage(method, path, nonce).getBytes(StandardCharsets.UTF_8)));
+        } catch (final java.security.GeneralSecurityException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    static String tunnelMessage(final String nonce, final String peerId, final int port, final String boot) {
+        return "yacy-sidecar-tunnel-v1|" + nonce + "|" + peerId + "|" + port + "|" + boot;
     }
 
     /** @return true if the value is the sidecar token (constant time) */
@@ -133,13 +167,25 @@ public final class P2PRoute {
         final Long failed = failures.get(peerId);
         if (failed != null && System.currentTimeMillis() - failed < RETRY_AFTER_FAILURE) return null;
         try {
-            final String url = sidecar + "/tunnel/" + peerId + "?addrs=" + URLEncoder.encode(addrs, StandardCharsets.UTF_8);
+            final PeerIdentity me = PeerIdentity.get();
+            if (me == null) throw new IllegalStateException("no peer identity");
+            final String path = "/tunnel/" + peerId;
+            final String nonce = newNonce();
+            final String url = sidecar + path + "?nonce=" + nonce + "&addrs=" + URLEncoder.encode(addrs, StandardCharsets.UTF_8);
+            // the token is never sent: a process that took the port while the sidecar was down learns nothing
             final HttpResponse<String> res = http().send(
-                    HttpRequest.newBuilder(URI.create(url)).header(TOKEN_HEADER, token()).timeout(Duration.ofSeconds(3)).GET().build(),
+                    HttpRequest.newBuilder(URI.create(url)).header(AUTH_HEADER, requestMAC("GET", path, nonce)).timeout(Duration.ofSeconds(3)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() != 200) throw new IllegalStateException("HTTP " + res.statusCode() + ": " + res.body().trim());
-            final int port = new JSONObject(res.body()).getInt("port");
+            final JSONObject o = new JSONObject(res.body());
+            final int port = o.getInt("port");
             if (port <= 1024 || port > 65535) throw new IllegalStateException("bad port " + port);
+            // only a port our own sidecar (the holder of our key) gave for this peer and this request
+            final String boot = o.optString("boot", "");
+            if (!Ed25519.verify(me.publicKeyB64(), tunnelMessage(nonce, peerId, port, boot), o.optString("sig", ""))) {
+                throw new IllegalStateException("the tunnel answer is not signed with our peer key");
+            }
+            sidecarBooted(boot);
             final Tunnel old = tunnels.put(peerId, new Tunnel(port));
             if (old != null && old.port != port) tunnelPorts.remove(old.port);
             tunnelPorts.add(port);

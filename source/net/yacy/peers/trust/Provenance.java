@@ -37,10 +37,19 @@ public final class Provenance {
     public static final String VERSION = "1";
     private static final String DOMAIN = "yacy-doc-v1\n";
     static final int BLOOM_MIN_BITS = 512;
-    static final int BLOOM_MAX_BITS = 32768;
+    /** 65536 bits hold about 11000 distinct words at half fill (long articles, PDFs, CJK pages with many bigrams) */
+    static final int BLOOM_MAX_BITS = 65536;
     static final int BLOOM_HASHES = 4;
-    /** above this share of set bits, a word matches by chance with probability > 0.5^4 = 6% */
-    static final double BLOOM_MAX_FILL = 0.5d;
+    /**
+     * a filter vouches for the query words only if a document without them matches with at most this probability:
+     * fill^(4 * words) (a half full filter for one word, 0.71 for two words, 0.79 for three)
+     */
+    static final double BLOOM_MAX_FALSE_MATCH = 0.0625d;
+
+    /** probability that a filter with this fill matches the given number of absent words */
+    static double falseMatch(final double fill, final int words) {
+        return Math.pow(fill, (double) BLOOM_HASHES * words);
+    }
 
     static double fillRatio(final byte[] filter) {
         if (filter == null || filter.length == 0) return 1.0d;
@@ -48,8 +57,8 @@ public final class Provenance {
         for (final byte b : filter) set += Integer.bitCount(b & 0xff);
         return (double) set / (filter.length * 8);
     }
-    /** longest accepted value; a 32768 bit bloom filter is 5462 base64 characters */
-    public static final int MAX_LENGTH = 6000;
+    /** longest accepted value; a 65536 bit bloom filter is 10923 base64 characters */
+    public static final int MAX_LENGTH = 11600;
 
     public enum Status {
         /** written by this peer */
@@ -96,14 +105,17 @@ public final class Provenance {
         /**
          * @return true if every word hash is (probably) in the document; always true for documents without a filter.
          *         The filter of a very long document of another author can be so full that it matches almost any word;
-         *         it then does not vouch for the words, and word index results of that document are not used (they
-         *         can still be found through Solr, which matches the text itself).
+         *         it then does not vouch for few query words, and word index results of that document are not used for
+         *         such queries (they can still be found through Solr, which matches the text itself).
          */
         public boolean containsAll(final Iterable<byte[]> wordHashes) {
             if (this.bloom == null) return true;
-            if (this.status != Status.SELF && fillRatio(this.bloom) > BLOOM_MAX_FILL) return false;
-            for (final byte[] h : wordHashes) if (!bloomContains(this.bloom, h)) return false;
-            return true;
+            int words = 0;
+            for (final byte[] h : wordHashes) {
+                if (!bloomContains(this.bloom, h)) return false;
+                words++;
+            }
+            return this.status == Status.SELF || words == 0 || falseMatch(fillRatio(this.bloom), words) <= BLOOM_MAX_FALSE_MATCH;
         }
     }
 

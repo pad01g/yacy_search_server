@@ -9,7 +9,7 @@
 //   YACY_ALLOW_TRUST_SETTINGS  1: set_ranking_setting may also change the trust filter settings
 import { lookup } from "node:dns/promises";
 import { readFileSync, realpathSync } from "node:fs";
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -64,32 +64,75 @@ function allowedSettings(env: NodeJS.ProcessEnv): string[] {
 }
 
 // ---- crawl targets
-/** loopback, private, link-local, unique-local, multicast, unspecified and documentation ranges */
-export function isPrivateAddress(ip: string): boolean {
-  const v = isIP(ip);
-  if (v === 4) {
-    const [a, b] = ip.split(".").map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+const BLOCKED = new BlockList();
+for (const [net, bits] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
+  ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.88.99.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15],
+  ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
+] as const)
+  BLOCKED.addSubnet(net, bits, "ipv4");
+for (const [net, bits] of [
+  ["::", 128], ["::1", 128], ["64:ff9b:1::", 48], ["100::", 64], ["2001::", 32], ["2001:db8::", 32], ["fc00::", 7],
+  ["fe80::", 10], ["fec0::", 10], ["ff00::", 8],
+] as const)
+  BLOCKED.addSubnet(net, bits, "ipv6");
+
+/** the 16 bytes of an IPv6 address (isIP must have said 6) */
+function ipv6Bytes(ip: string): number[] {
+  let x = ip.toLowerCase().replace(/%.*$/, "");
+  const v4 = x.match(/(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4) {
+    const [a, b, c, d] = v4[1].split(".").map(Number);
+    x = x.slice(0, -v4[1].length) + ((a << 8) | b).toString(16) + ":" + ((c << 8) | d).toString(16);
   }
-  if (v === 6) {
-    const x = ip.toLowerCase();
-    if (x === "::" || x === "::1") return true;
-    const mapped = x.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isPrivateAddress(mapped[1]);
-    return /^(fc|fd|fe[89ab]|ff)/.test(x) || x.startsWith("2001:db8");
-  }
-  return true;
+  const [head, tail] = x.includes("::") ? x.split("::") : [x, undefined];
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const groups = tail === undefined ? h : [...h, ...Array(8 - h.length - t.length).fill("0"), ...t];
+  return groups.flatMap((g) => {
+    const n = parseInt(g, 16);
+    return [n >> 8, n & 0xff];
+  });
 }
 
-export async function checkCrawlTarget(url: string, allowPrivate: boolean): Promise<void> {
+/**
+ * Loopback, private, shared, link-local, unique-local, multicast, reserved and documentation ranges. IPv6 forms that
+ * carry an IPv4 address (mapped ::ffff:a.b.c.d, compatible ::a.b.c.d, NAT64 64:ff9b::/96, 6to4 2002::/16) are
+ * judged by that address.
+ */
+export function isPrivateAddress(ip: string): boolean {
+  const v = isIP(ip);
+  if (v === 4) return BLOCKED.check(ip, "ipv4");
+  if (v !== 6) return true;
+  const b = ipv6Bytes(ip);
+  const v4 = (o: number) => b.slice(o, o + 4).join(".");
+  const zero = (from: number, to: number) => b.slice(from, to).every((x) => x === 0);
+  if (zero(0, 10) && b[10] === 0xff && b[11] === 0xff) return isPrivateAddress(v4(12)); // mapped
+  if (zero(0, 12) && !zero(12, 16) && !(zero(12, 15) && b[15] === 1)) return isPrivateAddress(v4(12)); // compatible
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && zero(4, 12)) return isPrivateAddress(v4(12)); // NAT64
+  if (b[0] === 0x20 && b[1] === 0x02) return isPrivateAddress(v4(2)); // 6to4
+  const canonical = Array.from({ length: 8 }, (_, i) => ((b[2 * i] << 8) | b[2 * i + 1]).toString(16)).join(":");
+  return BLOCKED.check(canonical, "ipv6");
+}
+
+/**
+ * @return the URL to give YaCy: rebuilt from the parts that were checked. YaCy parses URLs differently from Node
+ *         (e.g. "http://example.com\@127.0.0.1/" or "http://example.com#@127.0.0.1/" are 127.0.0.1 for YaCy), so the
+ *         original string is never passed on. This checks the start URL once; links, redirects and later DNS
+ *         answers are YaCy's to check (network.unit.domain=global refuses local addresses on public peers).
+ */
+export async function checkCrawlTarget(url: string, allowPrivate: boolean): Promise<string> {
+  if (/[\\\s]/.test(url)) throw new Error("crawl URLs must not contain backslashes or white space");
   const u = new URL(url);
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("crawl only http and https URLs");
   if (u.username || u.password) throw new Error("crawl URLs must not contain a user or password");
-  if (allowPrivate) return;
+  const rebuilt = `${u.protocol}//${u.host}${u.pathname}${u.search}`;
+  if (allowPrivate) return rebuilt;
   const host = u.hostname.replace(/^\[|\]$/g, "");
   const addresses = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
   if (addresses.length === 0 || addresses.some(isPrivateAddress))
     throw new Error(`${u.hostname} is a local or private address; set YACY_CRAWL_ALLOW_PRIVATE=1 to crawl such hosts (e.g. an intranet)`);
+  return rebuilt;
 }
 
 // ---- evaluation
@@ -188,8 +231,8 @@ export function createServer(yacy: YaCy, env: NodeJS.ProcessEnv = process.env): 
     },
     safely(async ({ url, depth, range, maxPages }, extra) => {
       if (range === "wide" && depth > 2) throw new Error("range 'wide' allows depth 0-2");
-      await checkCrawlTarget(url, allowPrivate);
-      return { message: await yacy.crawl(url, depth, range, maxPages, extra.signal) };
+      const target = await checkCrawlTarget(url, allowPrivate);
+      return { message: await yacy.crawl(target, depth, range, maxPages, extra.signal) };
     }),
   );
 
@@ -284,8 +327,13 @@ export function createServer(yacy: YaCy, env: NodeJS.ProcessEnv = process.env): 
       const after = await yacy.setSetting(key, value, extra.signal);
       if (after !== value) {
         // YaCy changed the value on the way (trimmed, decoded): put the old value back
-        if (before !== null) await yacy.setSetting(key, before, extra.signal).catch(() => undefined);
-        throw new Error(`${key} read ${JSON.stringify(after)} after setting it to ${JSON.stringify(value)}; the previous value ${JSON.stringify(before)} was restored`);
+        let outcome: string;
+        if (before === null) outcome = "it had no previous value to restore";
+        else {
+          const restored = await yacy.setSetting(key, before, extra.signal).catch((e: Error) => `error: ${e.message}`);
+          outcome = restored === before ? `the previous value ${JSON.stringify(before)} was restored` : `restoring the previous value ${JSON.stringify(before)} failed (${JSON.stringify(restored)}): check it`;
+        }
+        throw new Error(`${key} read ${JSON.stringify(after)} after setting it to ${JSON.stringify(value)}; ${outcome}`);
       }
       return { key, before, after };
     }),
@@ -313,13 +361,23 @@ export function createServer(yacy: YaCy, env: NodeJS.ProcessEnv = process.env): 
       const started = Date.now();
       const perQuery: (ReturnType<typeof score> & { query: string; top: string[] })[] = [];
       const skipped: string[] = [];
+      // clients give up on a tool call after 60 s by default: a query starts only if it can end within the budget,
+      // and one that takes longer is cut off (and reported as skipped) instead of losing the whole result
+      const expected = (resource === "global" ? waitMs : 0) + 2000;
       for (const c of cases) {
-        if (Date.now() - started > EVALUATION_BUDGET_MS) {
+        const left = EVALUATION_BUDGET_MS - (Date.now() - started);
+        if (left < expected) {
           skipped.push(c.query);
           continue;
         }
-        const { results } = await yacy.search(c.query, { resource, count: Math.max(k, c.relevant.length), waitMs, signal: extra.signal });
-        perQuery.push({ query: c.query, ...score(results, c.relevant, k), top: results.slice(0, k).map((r) => r.url) });
+        const deadline = AbortSignal.timeout(left);
+        try {
+          const { results } = await yacy.search(c.query, { resource, count: Math.max(k, c.relevant.length), waitMs, signal: AbortSignal.any([extra.signal, deadline]) });
+          perQuery.push({ query: c.query, ...score(results, c.relevant, k), top: results.slice(0, k).map((r) => r.url) });
+        } catch (e) {
+          if (!deadline.aborted || extra.signal.aborted) throw e;
+          skipped.push(c.query);
+        }
       }
       const mean = (f: (q: (typeof perQuery)[number]) => number) => (perQuery.length ? Math.round((perQuery.reduce((s, q) => s + f(q), 0) / perQuery.length) * 1000) / 1000 : null);
       return { k, evaluated: perQuery.length, skipped, mean: { precisionAtK: mean((q) => q.precisionAtK), recallAtK: mean((q) => q.recallAtK), rPrecision: mean((q) => q.rPrecision) }, perQuery };

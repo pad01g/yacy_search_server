@@ -17,7 +17,9 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
@@ -36,6 +38,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +101,8 @@ type sidecar struct {
 	yacy     *url.URL
 	token    string
 	boot     string
+	nonceMu  sync.Mutex
+	nonces   map[string]time.Time
 	relayMu  sync.RWMutex
 	relays   []peer.AddrInfo
 	mu       sync.Mutex
@@ -125,6 +130,7 @@ func main() {
 	relayOpen := flag.Bool("relay-open", false, "let every libp2p peer use the relay (without -relay-allow the relay refuses to start)")
 	reachability := flag.String("reachability", "auto", "auto, public or private (override AutoNAT)")
 	keyWait := flag.Duration("key-wait", 5*time.Minute, "how long to wait for the key and token files to appear")
+	watchdog := flag.Duration("yacy-watchdog", 3*time.Minute, "exit when the YaCy connector was unreachable this long (a restart policy then joins a restarted YaCy again); 0: never")
 	flag.Parse()
 
 	priv, err := loadKey(*keyFile, *keyCreate, *keyWait)
@@ -204,6 +210,9 @@ func main() {
 	go s.expireTunnels()
 	if !*relayService {
 		go s.serveStreams()
+		if *watchdog > 0 {
+			go watchYaCy(yacy.Host, *watchdog)
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -214,6 +223,27 @@ func main() {
 		mux.HandleFunc("/tunnel/", s.guard(*httpAddr, true, s.handleTunnel))
 	}
 	log.Fatal((&http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}).ListenAndServe())
+}
+
+// watchYaCy exits when the YaCy connector stays unreachable. A sidecar that shares the network namespace of the YaCy
+// container (docker network_mode service:...) is left in a dead namespace when that container restarts; exiting
+// lets the restart policy start it again in the new one.
+func watchYaCy(hostport string, limit time.Duration) {
+	if _, _, err := net.SplitHostPort(hostport); err != nil {
+		hostport = net.JoinHostPort(hostport, "80")
+	}
+	last := time.Now()
+	for range time.Tick(15 * time.Second) {
+		c, err := net.DialTimeout("tcp", hostport, 5*time.Second)
+		if err == nil {
+			_ = c.Close()
+			last = time.Now()
+			continue
+		}
+		if time.Since(last) > limit {
+			log.Fatalf("YaCy at %s unreachable for %v: exiting so that the container restarts", hostport, limit)
+		}
+	}
 }
 
 func randomID() string {
@@ -280,15 +310,22 @@ func loadToken(file string, wait time.Duration) (string, error) {
 	if file == "" {
 		return "", nil
 	}
-	data, err := waitForFile(file, wait)
-	if err != nil {
-		return "", err
+	deadline := time.Now().Add(wait)
+	for {
+		data, err := waitForFile(file, time.Until(deadline))
+		if err != nil {
+			return "", err
+		}
+		t := strings.TrimSpace(string(data))
+		if len(t) >= 16 {
+			return t, nil
+		}
+		// YaCy may be writing it right now
+		if time.Now().After(deadline) {
+			return "", errors.New("token too short in " + file)
+		}
+		time.Sleep(time.Second)
 	}
-	t := strings.TrimSpace(string(data))
-	if len(t) < 16 {
-		return "", errors.New("token too short in " + file)
-	}
-	return t, nil
 }
 
 // acl allows reservations and circuits only for the listed peers
@@ -321,8 +358,8 @@ func loadACL(file string) (acl, error) {
 	return a, sc.Err()
 }
 
-// guard protects the control API: only requests with the token, addressed to the loopback host name we listen on,
-// and not sent by a web page (Origin / Sec-Fetch-Site) are served. This stops local web pages and DNS rebinding.
+// guard protects the control API: only requests authenticated with the token, addressed to the loopback host name we
+// listen on, and not sent by a web page (Origin / Sec-Fetch-Site) are served. This stops local web pages and DNS rebinding.
 // A relay publishes its /status on all interfaces (other sidecars read its peer id there); then the host is not
 // checked, and the relay offers no /tunnel.
 func (s *sidecar) guard(listenAddr string, needToken bool, next http.HandlerFunc) http.HandlerFunc {
@@ -337,12 +374,67 @@ func (s *sidecar) guard(listenAddr string, needToken bool, next http.HandlerFunc
 			http.Error(w, "not for web pages", http.StatusForbidden)
 			return
 		}
-		if needToken && s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-YaCy-Sidecar-Token")), []byte(s.token)) != 1 {
-			http.Error(w, "token required", http.StatusUnauthorized)
-			return
+		if needToken && s.token != "" {
+			if err := s.checkAuth(r, time.Now()); err != nil {
+				http.Error(w, err.Error(), http.StatusUnauthorized)
+				return
+			}
 		}
 		next(w, r)
 	}
+}
+
+// requestMessage is what YaCy authenticates with HMAC-SHA256(token) for a control request. The token itself is never
+// sent: a process that took the control port while the sidecar was down learns nothing it could use later.
+func requestMessage(method, path, nonce string) string {
+	return "yacy-sidecar-req-v1|" + method + "|" + path + "|" + nonce
+}
+
+func requestMAC(token, method, path, nonce string) string {
+	m := hmac.New(sha256.New, []byte(token))
+	m.Write([]byte(requestMessage(method, path, nonce)))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
+
+// nonceWindow: a nonce is "<unix milliseconds>.<random>"; it is valid this long around its time, and only once
+const nonceWindow = 2 * time.Minute
+
+// checkAuth checks the X-YaCy-Sidecar-Auth header: the MAC of method, path and a fresh, unused nonce
+func (s *sidecar) checkAuth(r *http.Request, now time.Time) error {
+	nonce := r.URL.Query().Get("nonce")
+	dot := strings.IndexByte(nonce, '.')
+	if len(nonce) < 20 || len(nonce) > 80 || dot < 1 {
+		return errors.New("authentication required")
+	}
+	ms, err := strconv.ParseInt(nonce[:dot], 10, 64)
+	if err != nil {
+		return errors.New("bad nonce")
+	}
+	if d := now.Sub(time.UnixMilli(ms)); d > nonceWindow || d < -nonceWindow {
+		return errors.New("nonce expired (check the clock)")
+	}
+	want := requestMAC(s.token, r.Method, r.URL.Path, nonce)
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-YaCy-Sidecar-Auth")), []byte(want)) != 1 {
+		return errors.New("authentication failed")
+	}
+	s.nonceMu.Lock()
+	defer s.nonceMu.Unlock()
+	if s.nonces == nil {
+		s.nonces = map[string]time.Time{}
+	}
+	for n, t := range s.nonces {
+		if now.Sub(t) > 2*nonceWindow {
+			delete(s.nonces, n)
+		}
+	}
+	if _, used := s.nonces[nonce]; used {
+		return errors.New("nonce used before")
+	}
+	if len(s.nonces) >= 65536 {
+		return errors.New("too many requests")
+	}
+	s.nonces[nonce] = now
+	return nil
 }
 
 func isLoopbackHost(hostHeader, port string) bool {
@@ -442,7 +534,8 @@ type status struct {
 	RelayAddrs   []string `json:"relayAddrs"`
 	Relays       []string `json:"relays"`
 	Tunnels      int      `json:"tunnels"`
-	// Sig signs statusMessage(nonce, peerId, boot) with the peer key when /status is asked with ?nonce=
+	// Sig signs statusMessage(nonce, peerId, boot, reachability, relayAddrs) with the peer key when /status is asked
+	// with ?nonce=
 	Sig string `json:"sig,omitempty"`
 }
 
@@ -575,17 +668,10 @@ func (s *sidecar) dropReservation(id peer.ID) {
 
 func (s *sidecar) handleStatus(w http.ResponseWriter, r *http.Request) {
 	st := status{PeerID: s.host.ID().String(), Boot: s.boot, Reachability: strings.ToLower(s.reachability().String())}
-	if nonce := r.URL.Query().Get("nonce"); nonce != "" {
-		if len(nonce) > 64 {
-			http.Error(w, "nonce too long", http.StatusBadRequest)
-			return
-		}
-		sig, err := s.priv.Sign([]byte(statusMessage(nonce, st.PeerID, st.Boot)))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		st.Sig = base64.RawURLEncoding.EncodeToString(sig)
+	nonce := r.URL.Query().Get("nonce")
+	if len(nonce) > 64 {
+		http.Error(w, "nonce too long", http.StatusBadRequest)
+		return
 	}
 	seen := map[string]bool{}
 	for _, a := range s.host.Addrs() {
@@ -619,13 +705,27 @@ func (s *sidecar) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	st.Tunnels = len(s.tunnels)
 	s.mu.Unlock()
+	if nonce != "" {
+		// YaCy puts the relay addresses into its seed: they are signed too, so that a process in between cannot swap them
+		sig, err := s.priv.Sign([]byte(statusMessage(nonce, st.PeerID, st.Boot, st.Reachability, st.RelayAddrs)))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		st.Sig = base64.RawURLEncoding.EncodeToString(sig)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(st)
 }
 
 // statusMessage is what the sidecar signs for YaCy; YaCy verifies it with the public key of its own peer key
-func statusMessage(nonce, peerID, boot string) string {
-	return "yacy-sidecar-status-v1|" + nonce + "|" + peerID + "|" + boot
+func statusMessage(nonce, peerID, boot, reachability string, relayAddrs []string) string {
+	return "yacy-sidecar-status-v2|" + nonce + "|" + peerID + "|" + boot + "|" + reachability + "|" + strings.Join(relayAddrs, " ")
+}
+
+// tunnelMessage is what the sidecar signs in a /tunnel answer: YaCy only uses a port that its own sidecar gave
+func tunnelMessage(nonce, peerID string, port int, boot string) string {
+	return "yacy-sidecar-tunnel-v1|" + nonce + "|" + peerID + "|" + strconv.Itoa(port) + "|" + boot
 }
 
 // handleTunnel returns the local port of the tunnel to a peer, opening it on first use. The optional addrs
@@ -646,8 +746,13 @@ func (s *sidecar) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+	sig, err := s.priv.Sign([]byte(tunnelMessage(r.URL.Query().Get("nonce"), id.String(), port, s.boot)))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, "{\"port\":%d}\n", port)
+	_ = json.NewEncoder(w).Encode(map[string]any{"port": port, "boot": s.boot, "sig": base64.RawURLEncoding.EncodeToString(sig)})
 }
 
 // addPeerAddrs adds circuit addresses announced in a seed: only relay circuits that end in the peer's own id
@@ -719,6 +824,11 @@ func (s *sidecar) tunnel(id peer.ID) (int, error) {
 		return t.port, nil
 	}
 	if s.activeTunnelsLocked() >= maxTunnels {
+		// a retired port stays closed to reuse until YaCy has surely forgotten it; with too many, refuse new tunnels
+		// instead of freeing a port that YaCy may still send another peer's traffic to
+		if len(s.retired) >= maxRetired {
+			return 0, errors.New("too many tunnels, try again later")
+		}
 		s.retireOldestLocked()
 	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -798,17 +908,15 @@ func (s *sidecar) retireOldestLocked() {
 	}
 }
 
-// retireLocked keeps a tunnel's port for tunnelRetire (it answers 410), at most maxRetired of them: beyond that the
-// oldest listener is closed, so that tunnels to many peer ids cannot exhaust file descriptors
+// retireLocked keeps a tunnel's port for tunnelRetire (it answers 410), longer than YaCy remembers a port (5
+// minutes). New tunnels are refused while maxRetired are waiting, so that file descriptors stay bounded without
+// handing a port to another peer early.
 func (s *sidecar) retireLocked(t *tunnelEntry) {
-	if t.retired.IsZero() {
-		t.retired = time.Now()
+	if !t.retired.IsZero() {
+		return
 	}
+	t.retired = time.Now()
 	s.retired = append(s.retired, t)
-	for len(s.retired) > maxRetired {
-		s.retired[0].listener.Close()
-		s.retired = s.retired[1:]
-	}
 }
 
 // expireTunnels retires tunnels that were not used for a while and closes retired ones after tunnelRetire

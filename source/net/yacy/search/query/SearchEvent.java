@@ -1024,8 +1024,12 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         // Solr already required this share of the terms (minimum match). The coverage check only sees title, URL and
         // snippets, and can miss a term that Solr matched elsewhere (e.g. beyond the highlighted part of a long text,
         // or in a copy whose snippets were dropped); it must not weigh a result below what Solr guarantees.
+        // Solr counts every query term, also the wildcard and fuzzy ones that the coverage check leaves out; in the
+        // worst case those are among the matched ones.
+        final int clauses = Math.max(coverageTerms.size(), this.query.getQueryGoal().getIncludeSize());
         final double guaranteedCoverage = coverageTerms.isEmpty() ? 1.0d
-                : (double) QueryParams.requiredTerms(QueryParams.minimumMatch(this.query.getQueryGoal()), coverageTerms.size()) / coverageTerms.size();
+                : (double) Math.max(0, QueryParams.requiredTerms(QueryParams.minimumMatch(this.query.getQueryGoal()), clauses) - (clauses - coverageTerms.size()))
+                        / coverageTerms.size();
 
         long timer = System.currentTimeMillis();
 
@@ -2031,11 +2035,13 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
     /**
      * @return the weight of a result with this many words of text: 1 at or above thinWords, else
      *         (words / thinWords) ^ exponent, at least {@link SwitchboardConstants#SEARCH_RANKING_THIN_FLOOR}. A page
-     *         without text (0 words) is the thinnest and gets the floor; an unknown count (negative: not delivered)
-     *         weighs 1.
+     *         without text (0 words) is the thinnest and gets the floor. An unknown count (negative: not delivered,
+     *         or removed from a copy that its author did not sign, because anybody could have set it) weighs like a
+     *         page of half the threshold: such a copy must not rank above the author's own copy of a thin page.
      */
     static double thinWeight(final int words, final int thinWords, final double exponent) {
-        if (thinWords <= 0 || !(exponent > 0) || words < 0 || words >= thinWords) return 1.0d;
+        if (words < 0) return thinWords > 1 ? thinWeight(thinWords / 2, thinWords, exponent) : 1.0d;
+        if (thinWords <= 0 || !(exponent > 0) || words >= thinWords) return 1.0d;
         return Math.max(SwitchboardConstants.SEARCH_RANKING_THIN_FLOOR, Math.pow((double) words / thinWords, exponent));
     }
 

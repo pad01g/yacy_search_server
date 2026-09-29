@@ -65,6 +65,24 @@ docker compose の閉じた P2P 網を立てて測っている（検索品質: u
 | sidecar | 押し出されたトンネルのポート、全体の同時要求、要求の本文、リレーの利用者に上限が無い。seed の回線アドレスで内部ホストへ接続させられる | それぞれに上限。リレーは `-relay-allow` か `-relay-open` の明示が必須。回線アドレスは設定したリレーのアドレスから組み立て直す |
 | 秘密のファイル | トークンと鍵を書いてから権限を締めていた | 作成時から 0600。既存のファイルも起動時に締める |
 
+2 回目の全体レビュー（同日）で直したこと:
+
+| 対象 | 攻撃・不具合 | 対策 |
+|---|---|---|
+| hello | 同じ答えの `yourip` で自分の IP を書き換えた後に答えをもう一度判定していたので、中継した攻撃者の住所が「自分の住所」になり、信頼ピアの住所の証明を取れた | 答えの判定は 1 回だけ、`yourip` を反映する前に行う。「自分の住所」は seed の IP（1 つの答えで書き換わる）ではなく、インターフェースの住所、固定 IP、3 つの異なる鍵のピアが 2 つ以上の異なる網（/24、/48）で 6 時間以内に一致して報告した住所だけ（`OwnAddresses`）。IPv4 と IPv6 の両方を覚える |
+| hello | back-ping に証明を求めたため、`trust.seed.acceptUnsigned=true` の混在網で本家のピアが常に junior になっていた | 署名の無い seed は、受け入れる設定のときは以前どおり通す |
+| 検索 | `/yacy/search` に他人の署名済み seed と別の IP を送ると、そのピアの住所を書き換えられた（DHT の転送先・検索先を奪える） | 検索要求に付いた seed は直接の接触として扱わない。住所を動かせるのは back-ping 付きの hello だけ |
+| 結果 | 異なる語が約 5,700 を超える長い文書（長い記事、PDF、CJK の頁）が、Bloom の埋まり具合の上限で RWI の結果から全て落ちていた | Bloom を 65,536 ビットまでにし、固定の上限の代わりに、クエリの語数で偶然一致の確率（埋まり具合^(4×語数)）が 1/16 以下のときに使う |
+| 検索 | `"1 3<80%"` のように単純な指定と条件付きの指定を混ぜた mm は検査を通るが、Solr が全ての検索を拒む。条件の読み方と語数の数え方が Solr と違った | Solr が受け付ける形（単純な指定 1 つ、または条件付きだけ）だけを通す。計算を Solr の `calculateMinShouldMatch` と同じにし、ワイルドカードの語も数える |
+| 信頼の一覧 | 起動時に自分のファイルを読むときも版の上限（現在時刻 + 1 日）を当てたので、時計が遅れたピアが一覧を失った | 自分のファイルから読むときは上限を当てない。新しく受け取る文だけ。版には Unix 時刻を使う（`YYYYMMDDnn` のような大きな版は受け付けない） |
+| 信頼の一覧 | 同じコーディネータの下のオペレータが、コーディネータ自身の一覧のピアに `adult` などのタグを付けたり優先度を 0 にしたりできた | コーディネータ自身の一覧に載るピアはその項目で決まる。和集合と最小の優先度はオペレータの一覧どうしだけ |
+| 順位 | 語数を捨てた中継の写しが薄さの減点を免れ、作者自身の写しより上に来ることがあった | 語数の分からない結果は閾値の半分の語数として扱う |
+| CJK | NFKC を CJK を含む語にしか当てなかったので、全角の `ＡＢＣ` と `ＡＢＣ東京` の `ABC` が一致しなかった | 全ての語に NFKC。**半角・全角の文字を含む頁は索引し直すまで以前の語で残る** |
+| sidecar | トークンをそのまま送っていたので、sidecar の停止中にポートを取ったプロセスにトークンが渡った。`/status` の署名がリレーのアドレスを含まず、`/tunnel` の答えは署名が無かった | トークンは送らず、nonce（時刻付き、1 回限り）と方法・パスの HMAC を送る。`/status` の署名にリレーのアドレスと到達性、`/tunnel` の答えに nonce・ピア・ポート・起動 ID の署名 |
+| sidecar | 引退したトンネルが 256 を超えると、YaCy がまだ覚えているポートを閉じて、別のピアに再利用されうる | 引退したポートは 10 分閉じない。溢れたら新しいトンネルを断る |
+| sidecar | YaCy のコンテナを再起動すると、同じネットワーク名前空間の sidecar が古い名前空間に取り残される。トークンのファイルを空の間に読んで終了することがある | YaCy に 3 分届かなければ終了し、再起動の方針で入り直す（`-yacy-watchdog`）。トークンは一時ファイルに書いて名前を変える |
+| 互換性 | `TV` の形式（2 つの和）は以前のフォーク版と互換でない | フォークのピアは同時に更新する。混在の間は `trust.bundle.urls` から取る |
+
 鍵と一覧は `TrustTool` で作る（Docker イメージの中なら `/opt/yacy_search_server/lib/*`）:
 
 ```sh
@@ -98,7 +116,8 @@ TESTS="net.yacy.document.CJKBigramsTest net.yacy.document.WordTokenizerTest net.
   net.yacy.search.query.SearchEventCoverageTest net.yacy.search.snippet.TextSnippetTest
   net.yacy.peers.trust.PeerIdentityTest net.yacy.peers.trust.SeedSignatureTest net.yacy.peers.trust.TrustStoreTest
   net.yacy.peers.trust.ProvenanceTest net.yacy.peers.trust.TrustServiceTest net.yacy.peers.PeerActionsReplayTest
-  net.yacy.peers.SeedTest net.yacy.peers.SeedDBTest net.yacy.peers.ProtocolTest net.yacy.htroot.yacy.SearchPeerResolutionTest"
+  net.yacy.peers.SeedTest net.yacy.peers.SeedDBTest net.yacy.peers.ProtocolTest net.yacy.htroot.yacy.SearchPeerResolutionTest
+  net.yacy.peers.trust.OwnAddressesTest net.yacy.peers.trust.P2PRouteTest"
 ant compile
 FILES="test/java/net/yacy/peers/trust/PeerIdentityTestAccess.java"
 for t in $TESTS; do FILES="$FILES test/java/$(echo $t | tr . /).java"; done

@@ -6,7 +6,8 @@ name: Publish images and MCP server
 #   ghcr.io/pad01g/yacy-search-mcp       the MCP server (mcp/)
 # A tag mcp-v<version> (the version of mcp/package.json) also pushes the MCP image as :<version> and publishes
 # mcp/server.json to the MCP registry. A manual run only updates :latest and :sha-<commit>.
-# Only commits on the default branch are published.
+# Only commits on the default branch are published. The images and registry jobs run in the environment "release",
+# which only the default branch and mcp-v* tags may use (tags mcp-v* can only be created by administrators).
 
 on:
   push:
@@ -20,6 +21,9 @@ jobs:
   check:
     if: github.repository == 'pad01g/yacy_search_server'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       release: ${{ steps.version.outputs.release }}
@@ -54,16 +58,26 @@ jobs:
           else
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: steps.version.outputs.release == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: A released version is never overwritten
         if: steps.version.outputs.release == 'true'
         run: |
-          if docker manifest inspect "ghcr.io/pad01g/yacy-search-mcp:${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "::error::ghcr.io/pad01g/yacy-search-mcp:${{ steps.version.outputs.version }} exists already; raise the version"; exit 1
+          # only an explicit "does not exist" lets the release go on; any other error (network, rate limit) stops it
+          image="ghcr.io/pad01g/yacy-search-mcp:${{ steps.version.outputs.version }}"
+          if out=$(docker manifest inspect "$image" 2>&1); then
+            echo "::error::$image exists already; raise the version (after a failed image build use \"Re-run failed jobs\")"; exit 1
           fi
+          echo "$out" | grep -Eqi "manifest unknown|not found" || { echo "::error::cannot tell whether $image exists: $out"; exit 1; }
 
   images:
     needs: check
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
       packages: write
@@ -122,8 +136,10 @@ jobs:
 
   mcp-registry:
     needs: [check, images]
-    if: needs.check.outputs.release == 'true'
+    # also when the YaCy or sidecar image failed: the registry only needs the MCP image, checked below
+    if: always() && needs.check.result == 'success' && needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
       id-token: write
@@ -131,6 +147,8 @@ jobs:
       PUBLISHER_URL: https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz
       PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
     steps:
+      - name: The MCP image of this version was pushed
+        run: docker manifest inspect "ghcr.io/pad01g/yacy-search-mcp:${{ needs.check.outputs.version }}" > /dev/null
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Install mcp-publisher (pinned, checksum verified)
         run: |

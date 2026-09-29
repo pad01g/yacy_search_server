@@ -119,6 +119,7 @@ import net.yacy.kelondro.util.FileUtils;
 import net.yacy.kelondro.util.MemoryControl;
 import net.yacy.peers.graphics.ProfilingGraph;
 import net.yacy.peers.trust.Ed25519;
+import net.yacy.peers.trust.OwnAddresses;
 import net.yacy.peers.trust.P2PRoute;
 import net.yacy.peers.trust.ProvenAddresses;
 import net.yacy.peers.trust.Provenance;
@@ -241,6 +242,8 @@ public final class Protocol {
         Network.log.info("yacyClient.hello thread '" + Thread.currentThread().getName() + "' contacted peer at " + targetBaseURL + ", received " + ((content == null) ? "null" : content.length) + " bytes, time = " + responseTime + " milliseconds");
 
         // check consistency with expectation
+        // the answer to the challenge is judged once, before "yourip" of this same answer changes our own address
+        Answer answer0 = null;
         Seed otherPeer = null;
         String seed;
         if ( (targetHash != null) && (targetHash.length() > 0) && ((seed = result.get("seed0")) != null) ) {
@@ -255,7 +258,8 @@ public final class Protocol {
                         Network.log.info("yacyClient.hello: consistency error: otherPeer.hash = " + otherPeer.hash + ", otherHash = " + targetHash);
                         return null; // no success
                     }
-                    if (answeredChallenge(otherPeer, challenge, result, targetBaseURL) == Answer.FAILED) return null;
+                    answer0 = answeredChallenge(otherPeer, challenge, result, targetBaseURL);
+                    if (answer0 == Answer.FAILED) return null;
                 } catch (final IOException e ) {
                     Network.log.info("yacyClient.hello: consistency error: other seed bad:" + e.getMessage() + ", seed=" + seed);
                     return null; // no success
@@ -365,7 +369,7 @@ public final class Protocol {
                         final String host = routed ? null : resolvedHost(targetBaseURL);
                         if (host == null && !routed) continue;
                         s = Seed.genRemoteSeed(seedStr, false, host);
-                        final Answer answer = answeredChallenge(s, challenge, result, targetBaseURL);
+                        final Answer answer = answer0 != null && s.hash.equals(targetHash) ? answer0 : answeredChallenge(s, challenge, result, targetBaseURL);
                         if (answer == Answer.FAILED) return null;
                         // an answer we cannot bind to our own address may have been relayed by another peer: the key
                         // owner answered, but not necessarily at the address we contacted. Keep its known address.
@@ -425,6 +429,8 @@ public final class Protocol {
             return Answer.FAILED;
         }
         final Answer answer = observedIsMine(observed, target);
+        // what this key owner saw counts toward our own public address, together with the reports of other peers
+        if (!P2PRoute.isRouted(target)) OwnAddresses.report(observed, peer.hash, resolvedHost(target), System.currentTimeMillis());
         if (answer == Answer.FAILED) {
             Network.log.info("yacyClient: peer " + peer.getName() + "/" + peer.hash + " answered a request from " + observed + ", not from this peer");
             return Answer.FAILED;
@@ -436,20 +442,21 @@ public final class Protocol {
 
     /**
      * Whether the address the other peer saw the request coming from is ours. Through a sidecar tunnel it must be the
-     * sidecar marker, and libp2p has authenticated the peer. Otherwise it must be one of our known addresses: then the
-     * answer is {@link Answer#PROVEN}. A peer that does not know its public address (behind a NAT, just started, or
-     * after its address changed) cannot tell a relayed request from its own and gets {@link Answer#UNPROVEN}: the
-     * contact counts, but it proves no address (a relaying attacker must not be able to claim a trusted peer's key for
-     * its own address). Our own address is corrected by the "yourip" field of hello answers as before.
+     * sidecar marker, and libp2p has authenticated the peer. Otherwise it must be one of our own addresses: then the
+     * answer is {@link Answer#PROVEN}. Our own addresses are those of our interfaces, the static IP if one is
+     * configured, and the addresses independent peers agreed on ({@link OwnAddresses}); never the address of our seed,
+     * which the unsigned "yourip" of any single hello answer sets. A peer that does not know its public address yet
+     * cannot tell a relayed request from its own and gets {@link Answer#UNPROVEN}: the contact counts, but it proves no
+     * address (a relaying attacker must not be able to claim a trusted peer's key for its own address).
      */
     static Answer observedIsMine(final String observed, final MultiProtocolURL target) {
         if (P2PRoute.isRouted(target)) return SeedSignature.OBSERVED_SIDECAR.equals(observed) ? Answer.PROVEN : Answer.FAILED;
         if (SeedSignature.OBSERVED_SIDECAR.equals(observed)) return Answer.FAILED;
         final Switchboard sb = Switchboard.getSwitchboard();
         if (sb == null || sb.peers == null || !sb.peers.mySeedIsDefined()) return Answer.UNPROVEN;
-        final Seed my = sb.peers.mySeed();
-        final Set<String> mine = new HashSet<>(my.getIPs());
-        mine.addAll(sb.myPublicIPs());
+        final Set<String> mine = new HashSet<>(sb.myPublicIPs());
+        if (serverCore.useStaticIP) mine.addAll(sb.peers.mySeed().getIPs());
+        mine.addAll(OwnAddresses.confirmed(System.currentTimeMillis()));
         for (final String ip : mine) if (sameAddress(ip, observed)) return Answer.PROVEN;
         if (Domains.isLocalhost(observed)) return Domains.isLocalhost(target.getHost()) ? Answer.PROVEN : Answer.FAILED;
         return Answer.UNPROVEN;
@@ -487,7 +494,10 @@ public final class Protocol {
             if (resp == null) return new long[] {-1, -1};
             // the back-ping of hello: only an address where the owner of the seed's key answers counts
             // (an answer we cannot bind to our address does not count: another peer may have relayed it)
-            if (answeredChallenge(target, challenge, result, targetBaseURL) != Answer.PROVEN) return new long[] {-1, -1};
+            // (unsigned seeds, accepted with trust.seed.acceptUnsigned=true, cannot prove anything: they pass as before)
+            final Answer answer = answeredChallenge(target, challenge, result, targetBaseURL);
+            final boolean unsignedAccepted = answer == Answer.UNPROVEN && target.signatureStatus() == SeedSignature.Status.UNSIGNED;
+            if (answer != Answer.PROVEN && !unsignedAccepted) return new long[] {-1, -1};
             String magic = result.get("magic");
             if (magic == null) magic = "0";
             try {

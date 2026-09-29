@@ -25,7 +25,10 @@ test("score computes precision, recall, R-precision and ranks; duplicates count 
 
 test("private and special addresses are recognised", () => {
   for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1"]) assert.ok(isPrivateAddress(ip), ip);
-  for (const ip of ["8.8.8.8", "2606:4700::1111", "172.32.0.1"]) assert.ok(!isPrivateAddress(ip), ip);
+  // IPv6 forms that carry an IPv4 address, and the rest of the special ranges
+  for (const ip of ["::ffff:7f00:1", "::ffff:a9fe:a9fe", "::7f00:1", "64:ff9b::a9fe:a9fe", "2002:7f00:1::1", "fec0::1", "198.18.0.1", "192.0.0.8", "192.0.2.1", "203.0.113.5", "255.255.255.255", "2001:db8::1"])
+    assert.ok(isPrivateAddress(ip), ip);
+  for (const ip of ["8.8.8.8", "2606:4700::1111", "172.32.0.1", "::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::1"]) assert.ok(!isPrivateAddress(ip), ip);
 });
 
 test("crawl refuses other schemes and private hosts unless allowed", async () => {
@@ -33,7 +36,12 @@ test("crawl refuses other schemes and private hosts unless allowed", async () =>
   await assert.rejects(checkCrawlTarget("http://127.0.0.1:8090/ConfigProperties_p.html", false), /private/);
   await assert.rejects(checkCrawlTarget("http://169.254.169.254/latest", false), /private/);
   await assert.rejects(checkCrawlTarget("http://user:pw@example.org/", false), /user or password/);
-  await checkCrawlTarget("http://10.0.0.5/", true);
+  assert.equal(await checkCrawlTarget("http://10.0.0.5/a?b=1#frag", true), "http://10.0.0.5/a?b=1");
+  // what Node and YaCy read differently never reaches YaCy
+  await assert.rejects(checkCrawlTarget("http://example.com\\@127.0.0.1/", false), /backslashes/);
+  assert.equal(await checkCrawlTarget("http://example.com#@127.0.0.1/", true), "http://example.com/");
+  await assert.rejects(checkCrawlTarget("http://[::ffff:127.0.0.1]:8090/", false), /private/);
+  await assert.rejects(checkCrawlTarget("http://[::ffff:169.254.169.254]/latest/meta-data/", false), /private/);
 });
 
 test("setting values are checked per key", () => {

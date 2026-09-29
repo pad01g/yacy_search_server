@@ -109,6 +109,19 @@ public class ProvenanceTest {
     }
 
     @Test
+    public void testLongDocumentsStillVouchForTheirWords() {
+        // 8000 distinct words (a long article): the filter is not saturated for one query word, as it was at 32768 bits
+        final List<String> many = new java.util.ArrayList<>();
+        for (int i = 0; i < 8000; i++) many.add("w" + i);
+        final Provenance.Verdict t = verifyAsOther(Provenance.sign(URL, "t", many), URL, "t", true);
+        assertTrue(t.containsAll(Collections.singletonList(Word.word2hash("w17"))));
+        assertTrue(t.containsAll(Arrays.asList(Word.word2hash("w17"), Word.word2hash("w4711"))));
+        // a fuller filter vouches only for more words together
+        assertTrue(Provenance.falseMatch(0.6d, 1) > Provenance.BLOOM_MAX_FALSE_MATCH);
+        assertTrue(Provenance.falseMatch(0.6d, 2) <= Provenance.BLOOM_MAX_FALSE_MATCH);
+    }
+
+    @Test
     public void testAcceptNeverTakesInvalid() {
         assertFalse(Provenance.accept(verifyAsOther("1|x|y|z", URL, "t", true)));
         assertTrue(Provenance.accept(verifyAsOther(signed(), URL, "Autovacuum tuning", true)));

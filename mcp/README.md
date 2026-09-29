@@ -47,7 +47,7 @@ For a peer outside Docker use `-e YACY_URL=http://host.docker.internal:8090` (Li
 | `YACY_URL` | `http://localhost:8090` | base URL of the peer |
 | `YACY_ADMIN_USER` | `admin` | administrator account (crawl, status counts, settings) |
 | `YACY_ADMIN_PASSWORD` | unset | administrator password; without it `crawl`, the settings tools and the index counts of `index_status` are not available |
-| `YACY_CRAWL_ALLOW_PRIVATE` | unset | `1`: `crawl` may reach loopback and private addresses (an intranet). Otherwise only http(s) URLs of public hosts |
+| `YACY_CRAWL_ALLOW_PRIVATE` | unset | `1`: `crawl` may reach loopback and private addresses (an intranet). Otherwise only http(s) URLs of public hosts. This checks the start URL only; the links and redirects YaCy follows are limited by YaCy's own `network.unit.domain` (`global` on public peers refuses local addresses) |
 | `YACY_ALLOW_TRUST_SETTINGS` | unset | `1`: `set_ranking_setting` may also change `trust.search.acceptUnverified` and `trust.policy.excludeTags` |
 
 ## Tools
@@ -59,8 +59,8 @@ For a peer outside Docker use `-e YACY_URL=http://host.docker.internal:8090` (Li
 | `index_status` | indexed documents, crawl queues, peer type and connections; explains a paused crawler (load average) and a peer without a public address |
 | `peers` | connected peers: signed seed, reach (direct / relay), tags |
 | `get_ranking_settings` | the ranking and filtering settings with their meaning |
-| `set_ranking_setting` | change one of them (allow-list only: minimum match, coverage and thin page weights, title phrase boost, wait time, unverified results, excluded tags) |
-| `evaluate_ranking` | queries with known relevant URLs: precision@k, recall@k, R-precision, the rank of each relevant URL; stops starting new queries after about 50 s (reported as `skipped`) |
+| `set_ranking_setting` | change one of them (allow-list only: minimum match, coverage and thin page weights, title phrase boost, wait time; unverified results and excluded tags only with `YACY_ALLOW_TRUST_SETTINGS=1`) |
+| `evaluate_ranking` | queries with known relevant URLs: precision@k, recall@k, R-precision, the rank of each relevant URL; finishes within about 50 s (queries that do not fit are reported as `skipped`) |
 | `trust_status` | the signed delegations and peer lists the peer holds |
 
 A typical loop for improving results: `evaluate_ranking` → `set_ranking_setting` → `evaluate_ranking`.

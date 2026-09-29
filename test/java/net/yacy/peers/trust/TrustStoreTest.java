@@ -154,6 +154,25 @@ public class TrustStoreTest {
     }
 
     @Test
+    public void testCoordinatorsOwnListDecidesOverItsOperators() throws Exception {
+        add(delegation(this.coordinator, this.operator, 1, false));
+        final KeyPair other = Ed25519.generate();
+        add(delegation(this.coordinator, other, 1, false));
+        add(list(this.coordinator, 1, new Object[][] {{this.peerA, 90}}));
+        // an operator cannot lower or tag a peer the coordinator lists itself
+        add(list(this.operator, 1, new Object[][] {{this.peerA, 0, "adult"}, {this.peerB, 80, "ads"}}));
+        // between operators the lowest priority and all tags count
+        add(list(other, 1, new Object[][] {{this.peerB, 60}}));
+        final Map<String, TrustStore.Entry> e = this.store.effective();
+        final TrustStore.Entry a = e.get(PeerIdentity.peerHashOf(pk(this.peerA)));
+        assertEquals(90, a.priority);
+        assertFalse(a.tags.contains("adult"));
+        final TrustStore.Entry b = e.get(PeerIdentity.peerHashOf(pk(this.peerB)));
+        assertEquals(60, b.priority);
+        assertTrue(b.tags.contains("ads"));
+    }
+
+    @Test
     public void testVersionSummaryAndExchange() throws Exception {
         final String before = this.store.versionSummary();
         add(delegation(this.coordinator, this.operator, 1, false));

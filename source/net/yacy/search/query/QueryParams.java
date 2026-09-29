@@ -723,44 +723,54 @@ public final class QueryParams {
         return isValidMinimumMatch(value) ? value : dflt;
     }
 
-    private static final java.util.regex.Pattern MM_PART = java.util.regex.Pattern.compile("(\\d+<)?-?\\d+%?");
+    private static final java.util.regex.Pattern MM_SIMPLE = java.util.regex.Pattern.compile("-?\\d{1,9}%?");
+    private static final java.util.regex.Pattern MM_CONDITIONAL = java.util.regex.Pattern.compile("\\d{1,9}<-?\\d{1,9}%?");
 
-    /** @return true for a Solr minimum match specification such as "2", "-1", "75%" or "2<-1 5<80%" */
+    /**
+     * @return true for a minimum match specification that Solr accepts for every number of terms: one simple
+     *         expression ("2", "-1", "75%") or only conditional ones ("2<-1 5<80%"). A mix ("1 3<80%") makes Solr
+     *         reject the query.
+     */
     public static boolean isValidMinimumMatch(final String mm) {
         if (mm == null || mm.isEmpty() || mm.length() > 100) return false;
-        for (final String part : mm.trim().split("\\s+")) if (!MM_PART.matcher(part).matches()) return false;
+        final String[] parts = mm.trim().split("\\s+");
+        if (parts.length == 1 && MM_SIMPLE.matcher(parts[0]).matches()) return true;
+        for (final String part : parts) if (!MM_CONDITIONAL.matcher(part).matches()) return false;
         return true;
     }
 
     /**
-     * The number of the n terms that a Solr minimum match specification requires (Solr's calculateMinShouldMatch):
-     * conditional parts "k<v" apply when n > k, the last applicable one wins; without one, all terms are required.
+     * The number of the n optional clauses that a minimum match specification requires, computed as Solr's
+     * SolrPluginUtils.calculateMinShouldMatch does: conditions are read in order, the first "k<v" with n <= k ends the
+     * reading, otherwise v applies (the percentage in float arithmetic, as Solr computes it).
      */
     public static int requiredTerms(final String mm, final int n) {
         if (n <= 0) return 0;
         if (!isValidMinimumMatch(mm)) return n;
-        String spec = null;
-        boolean conditional = false;
-        for (final String part : mm.trim().split("\\s+")) {
-            final int lt = part.indexOf('<');
-            if (lt < 0) {
-                spec = part;
-                continue;
+        final String spec = mm.trim();
+        int result = n;
+        if (spec.indexOf('<') >= 0) {
+            for (final String part : spec.split("\\s+")) {
+                final int lt = part.indexOf('<');
+                if (n <= Integer.parseInt(part.substring(0, lt))) return result;
+                result = simpleMinimumMatch(n, part.substring(lt + 1));
             }
-            conditional = true;
-            if (n > Integer.parseInt(part.substring(0, lt))) spec = part.substring(lt + 1);
+            return result;
         }
-        if (spec == null) return n; // no unconditional part and no applicable condition: all terms
-        final boolean percent = spec.endsWith("%");
-        final int v = Integer.parseInt(percent ? spec.substring(0, spec.length() - 1) : spec);
-        int r;
-        if (percent) {
-            final int part = (int) Math.floor(n * Math.abs(v) / 100.0d);
-            r = v < 0 ? n - part : part;
+        return simpleMinimumMatch(n, spec);
+    }
+
+    private static int simpleMinimumMatch(final int n, final String spec) {
+        int result;
+        if (spec.endsWith("%")) {
+            final int percent = Integer.parseInt(spec.substring(0, spec.length() - 1));
+            final float calc = (n * percent) * (1 / 100f);
+            result = calc < 0 ? n + (int) calc : (int) calc;
         } else {
-            r = v < 0 ? n + v : v;
+            final int calc = Integer.parseInt(spec);
+            result = calc < 0 ? n + calc : calc;
         }
-        return Math.max(0, Math.min(n, r));
+        return result < 0 ? 0 : Math.min(n, result);
     }
 
     /** the query as a phrase inside a bq clause: without quotes and backslashes */

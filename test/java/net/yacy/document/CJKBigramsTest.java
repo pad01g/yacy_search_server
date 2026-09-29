@@ -27,6 +27,9 @@ public class CJKBigramsTest {
     @Test
     public void testSplitKeepsNonCJKTokens() {
         assertEquals(Arrays.asList("bundler"), CJKBigrams.split("bundler"));
+        // full-width Latin without CJK characters is folded as in a mixed token
+        assertEquals(Arrays.asList("ABC"), CJKBigrams.split("ＡＢＣ"));
+        assertEquals(Arrays.asList("ABC", "東京"), CJKBigrams.split("ＡＢＣ東京"));
         assertEquals(Arrays.asList("erc-4337"), CJKBigrams.split("erc-4337"));
     }
 

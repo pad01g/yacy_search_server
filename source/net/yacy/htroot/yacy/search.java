@@ -211,7 +211,9 @@ public final class search {
         if (sb.peers == null) {
             Network.log.severe("yacy.search: seed cache not initialized");
         } else {
-            sb.peers.peerActions.peerArrival(remoteSeed, true);
+            // not a direct contact: anybody can send any signed seed with a search request, and the IP of a seed is not
+            // signed. Only hello (with its back-ping) may move a known peer to another address.
+            sb.peers.peerActions.peerArrival(remoteSeed, false);
         }
 
         // prepare search

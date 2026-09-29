@@ -100,6 +100,9 @@ public final class TrustStore {
     private String effectiveFor = null;
     private Map<String, Entry> effective = null;
 
+    /** true while the store reads its own file: statements accepted before stay, even if our clock went back */
+    private boolean loading = false;
+
     TrustStore(final File file, final Supplier<List<String>> coordinators, final Supplier<String> network) {
         this.file = file;
         this.coordinators = coordinators;
@@ -110,7 +113,13 @@ public final class TrustStore {
         final TrustStore store = new TrustStore(file, coordinators, network);
         if (file != null && file.exists()) {
             try {
-                final int n = store.importJSON(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8), false);
+                store.loading = true;
+                final int n;
+                try {
+                    n = store.importJSON(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8), false);
+                } finally {
+                    store.loading = false;
+                }
                 ConcurrentLog.info("TrustStore", "loaded " + n + " trust statements from " + file);
             } catch (final IOException e) {
                 ConcurrentLog.warn("TrustStore", "cannot read " + file + ": " + e.getMessage());
@@ -180,7 +189,7 @@ public final class TrustStore {
         // statements for other networks are neither used nor stored: a higher version for another network must not
         // block the versions of ours, and a revocation for another network must not revoke an operator here
         if (!e.appliesTo(this.network.get())) return false;
-        if (e.version > maxAcceptedVersion()) return false;
+        if (e.version > (this.loading ? MAX_VERSION : maxAcceptedVersion())) return false;
         final List<String> coords = this.coordinators.get();
         if (TrustEnvelope.TYPE_DELEGATION.equals(e.type)) {
             if (!coords.contains(e.signer)) return false;
@@ -257,12 +266,14 @@ public final class TrustStore {
         final String key = coordinators.toString() + '|' + network;
         if (key.equals(this.effectiveFor)) return this.effective;
         final Map<String, Entry> result = new LinkedHashMap<>();
+        // peers the coordinator lists itself: its entry decides, operators cannot lower or tag them
+        final Set<String> decided = new java.util.HashSet<>();
         for (int ci = 0; ci < coordinators.size(); ci++) {
             final String coordinator = coordinators.get(ci);
             for (final String operator : operators(coordinator, network)) {
                 final TrustEnvelope list = this.lists.get(operator);
                 if (list == null || !list.appliesTo(network)) continue;
-                addPeers(result, list, ci);
+                addPeers(result, list, ci, operator.equals(coordinator), decided);
             }
         }
         this.effective = Collections.unmodifiableMap(result);
@@ -288,7 +299,8 @@ public final class TrustStore {
         return ops;
     }
 
-    private static void addPeers(final Map<String, Entry> result, final TrustEnvelope list, final int coordinatorIndex) {
+    private static void addPeers(final Map<String, Entry> result, final TrustEnvelope list, final int coordinatorIndex, final boolean own,
+            final Set<String> decided) {
         final JSONArray peers = list.payload.optJSONArray("peers");
         if (peers == null) return;
         for (int i = 0; i < peers.length() && i < MAX_PEERS_PER_LIST; i++) {
@@ -298,12 +310,15 @@ public final class TrustStore {
             if (pk == null) continue;
             final String hash = PeerIdentity.peerHashOf(pk);
             final Entry known = result.get(hash);
-            // a coordinator listed earlier decides; lists under the same coordinator are merged: the lowest priority
-            // and all tags, so that one operator cannot drop a tag (e.g. ads) that another operator declared
+            // a coordinator listed earlier decides, and so does the coordinator's own list (it comes first) over its
+            // operators; lists of operators of the same coordinator are merged: the lowest priority and all tags, so
+            // that one operator cannot drop a tag (e.g. ads) that another operator declared
             if (known != null && known.coordinator != coordinatorIndex) continue;
+            if (decided.contains(hash)) continue;
+            if (own) decided.add(hash);
             int priority = Math.max(0, Math.min(100, p.optInt("priority", 100)));
             final Set<String> tags = new LinkedHashSet<>();
-            if (known != null) {
+            if (known != null && !own) {
                 priority = Math.min(priority, known.priority);
                 tags.addAll(known.tags);
             }

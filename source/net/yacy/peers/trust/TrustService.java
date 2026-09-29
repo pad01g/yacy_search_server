@@ -230,7 +230,12 @@ public final class TrustService {
             if (!me.libp2pPeerId().equals(o.optString("peerId", ""))) {
                 throw new IOException("the sidecar reports peer id " + o.optString("peerId", "") + ", expected " + me.libp2pPeerId());
             }
-            final String signed = "yacy-sidecar-status-v1|" + nonce + "|" + o.optString("peerId", "") + "|" + o.optString("boot", "");
+            // the signature covers the reachability and the relay addresses that go into our seed
+            final JSONArray signedRelays = o.optJSONArray("relayAddrs");
+            final List<String> raw = new ArrayList<>();
+            if (signedRelays != null) for (int k = 0; k < signedRelays.length(); k++) raw.add(signedRelays.optString(k, ""));
+            final String signed = "yacy-sidecar-status-v2|" + nonce + "|" + o.optString("peerId", "") + "|" + o.optString("boot", "") + "|"
+                    + o.optString("reachability", "") + "|" + String.join(" ", raw);
             if (!Ed25519.verify(me.publicKeyB64(), signed, o.optString("sig", ""))) {
                 throw new IOException("the process at " + base + " did not prove that it holds our peer key (old sidecar version, or not our sidecar)");
             }

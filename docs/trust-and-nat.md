@@ -242,6 +242,7 @@ payload の種類:
 | `trust.selfTags` | 空 | 自分の seed に載せる自己申告タグ |
 | `trust.signedOnly` | `false` | コーディネータが無いとき、署名されたピアをすべて信頼する（閉じた網向け） |
 | `p2p.sidecar.url` | 空 | sidecar の制御 API |
+| `p2p.bootstrap.peers` | 空 | 接続が 3 ピア未満の間、直接 hello するピアの URL（カンマ区切り、8 個まで）。新しい網の最初のピアどうしをつなぐ |
 | `p2p.sidecar.yacyPort` | `8096` | sidecar が他ピアの要求を YaCy へ渡すループバックの口 |
 | `p2p.mode` | `auto` | `auto` / `direct` / `leecher` |
 | `p2p.relay.dhtStorage` | `false` | リレー経由でも DHT の保存先になる |

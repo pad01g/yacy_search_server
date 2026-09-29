@@ -1040,6 +1040,10 @@ remotesearch.maxtime = 5000
 remotesearch.dht.minage = 3
 
 # peer identity, trust lists and NAT traversal, see docs/trust-and-nat.md
+# peers to say hello to directly while fewer than 3 peers are connected, comma separated base URLs
+# (e.g. http://100.101.102.103:8090 on a Tailscale network). Seed lists only carry senior peers, so the first
+# peers of a new network need this to find each other; one URL of any member is enough to join.
+p2p.bootstrap.peers =
 # accept seeds of peers without owner signature (unmodified YaCy peers); needed to use the index of the old network
 trust.seed.acceptUnsigned = false
 # Ed25519 public keys (base64url) of the trust coordinators, separated by ',', first = highest priority.

@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "description": "MCP server for a YaCy peer: peer-to-peer web search, crawling, ranking settings and search quality evaluation",
-  "license": "GPL-2.0-or-later",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24"

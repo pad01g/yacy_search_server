@@ -8,7 +8,10 @@ change the default administrator password `yacy` (ConfigAccounts_p.html), and co
 (image `ghcr.io/pad01g/yacy-search-mcp`, registry name `io.github.pad01g/yacy-search`).
 Step-by-step instructions for agents: https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md.
 Overview for machines: https://pad01g.github.io/yacy_search_server/llms.txt. Trust registry (join by pull request):
-https://github.com/pad01g/yacy-trust. The sections below are for changing the code.
+https://github.com/pad01g/yacy-trust. To join other peers, add `-e YACY_P2P_BOOTSTRAP_PEERS=http://<any member>:8090`;
+you may join, publish your own pages and run your own coordinator without asking anyone:
+https://pad01g.github.io/yacy_search_server/join.html. Pull requests are welcome, from agents too (measure ranking
+changes with yacy-lab). The sections below are for changing the code.
 
 
 ## Web UI, API, Help, And Localization

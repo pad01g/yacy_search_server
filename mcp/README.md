@@ -76,3 +76,8 @@ them. Values of settings are checked per key, and a value YaCy stores differentl
 npm ci && npm run typecheck && npm test                      # unit tests
 YACY_URL=http://localhost:8090 YACY_ADMIN_PASSWORD=yacy npm test   # also calls every tool on a live peer
 ```
+
+## License
+
+This directory (the MCP server) is under the [MIT license](LICENSE). It talks to YaCy only over HTTP and contains
+no YaCy code; the rest of this repository, YaCy itself, stays under the GPL.

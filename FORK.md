@@ -46,6 +46,11 @@ docker compose の閉じた P2P 網を立てて測っている（検索品質: u
 - 他ピアの応答は既定で 5 秒待ち（`remotesearch.maxtime`、10 秒まで）、届いた順に表示する。
 - NAT 越えは `p2p.sidecar.url` を設定し、`sidecar/` の sidecar を同じ鍵（`DATA/SETTINGS/peer.key`）とトークン
   （`DATA/SETTINGS/sidecar.token`）で動かしたときだけ有効。
+- `p2p.bootstrap.peers`（カンマ区切りの URL、8 個まで）: 接続しているピアが 3 つ未満の間、peer ping のたびにそのピアへ直接 hello する
+  （`/yacy/seedlist.json?my=` で相手のハッシュを知り、いつものチャレンジで鍵と住所を確かめる）。seed の一覧には senior しか載らず、
+  新しいピアは誰かに届かれるまで senior にならないので、新しい網（Tailscale の網など）の最初のピアどうしはこれが無いと
+  見つけ合えなかった。Docker では `-e YACY_P2P_BOOTSTRAP_PEERS=http://<網の誰か>:8090`（`YACY_<KEY>` の環境変数は、小文字にして
+  `_` を `.` と読んだ設定を上書きする）。100.64.0.0/10 の Docker の網に 3 台を立てた試験で、約 90 秒で全員が senior になった。
 
 ### 敵対的レビューで直したこと（2026-09-29）
 

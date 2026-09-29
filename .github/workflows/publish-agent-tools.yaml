@@ -86,14 +86,17 @@ jobs:
       matrix:
         include:
           - image: yacy-improved-search
+            license: GPL-2.0-or-later
             context: .
             file: docker/Dockerfile
             description: "YaCy peer-to-peer search engine, improved-search fork: stricter ranking, CJK search, signed peers and documents, trust lists, NAT traversal"
           - image: yacy-sidecar
+            license: GPL-2.0-or-later
             context: sidecar
             file: sidecar/Dockerfile
             description: "libp2p sidecar that lets a YaCy peer behind a NAT answer searches through a circuit relay"
           - image: yacy-search-mcp
+            license: MIT
             context: mcp
             file: mcp/Dockerfile
             description: "MCP server for a YaCy peer: peer-to-peer web search, crawling, ranking settings and search quality evaluation"
@@ -117,7 +120,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/pad01g/yacy_search_server
             org.opencontainers.image.description=${{ matrix.description }}
-            org.opencontainers.image.licenses=GPL-2.0-or-later
+            org.opencontainers.image.licenses=${{ matrix.license }}
           annotations: |
             org.opencontainers.image.source=https://github.com/pad01g/yacy_search_server
             org.opencontainers.image.description=${{ matrix.description }}

@@ -188,6 +188,8 @@ public class Network
                 + this.sb.peers.sizeConnected()
                 + " new peer(s)");
         }
+        // peers given by URL (p2p.bootstrap.peers): the first peers of a new network find each other this way
+        BootstrapPeers.contact(this.sb);
         this.publishMySeed();
     }
 

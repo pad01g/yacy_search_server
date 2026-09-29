@@ -48,6 +48,7 @@ For a peer outside Docker use `-e YACY_URL=http://host.docker.internal:8090` (Li
 | `YACY_ADMIN_USER` | `admin` | administrator account (crawl, status counts, settings) |
 | `YACY_ADMIN_PASSWORD` | unset | administrator password; without it `crawl`, the settings tools and the index counts of `index_status` are not available |
 | `YACY_CRAWL_ALLOW_PRIVATE` | unset | `1`: `crawl` may reach loopback and private addresses (an intranet). Otherwise only http(s) URLs of public hosts. This checks the start URL only; the links and redirects YaCy follows are limited by YaCy's own `network.unit.domain` (`global` on public peers refuses local addresses) |
+| `YACY_TIMEOUT_MS` | `30000` | timeout of one request to the peer |
 | `YACY_ALLOW_TRUST_SETTINGS` | unset | `1`: `set_ranking_setting` may also change `trust.search.acceptUnverified` and `trust.policy.excludeTags` |
 
 ## Tools

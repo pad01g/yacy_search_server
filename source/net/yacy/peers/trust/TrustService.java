@@ -217,8 +217,8 @@ public final class TrustService {
         }
         try {
             // the sidecar must prove that it holds our key: it signs a fresh nonce. The peer id alone is public (it is in
-            // the seed), so another local process that took the port could claim it. Only a proven sidecar gets the
-            // token (with the tunnel requests), and only it is used for tunnels.
+            // the seed), so another local process that took the port could claim it. Only a proven sidecar is used for
+            // tunnels (the token is never sent: tunnel requests carry an HMAC of it, see P2PRoute).
             final PeerIdentity me = PeerIdentity.get();
             if (me == null) throw new IOException("no peer identity");
             final byte[] n = new byte[16];

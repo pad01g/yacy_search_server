@@ -120,7 +120,7 @@ type sidecar struct {
 func main() {
 	keyFile := flag.String("key", "", "PEM (PKCS#8) Ed25519 key of the YaCy peer; empty: random key")
 	keyCreate := flag.Bool("key-create", false, "create the key file if it does not exist (for a relay with a stable id)")
-	tokenFile := flag.String("token-file", "", "file with the token that clients of the control API must send (X-YaCy-Sidecar-Token)")
+	tokenFile := flag.String("token-file", "", "file with the token: control requests are authenticated with an HMAC of it (X-YaCy-Sidecar-Auth), and the sidecar sends it to the YaCy connector (X-YaCy-Sidecar-Token)")
 	listen := flag.String("listen", "/ip4/0.0.0.0/tcp/4001", "libp2p listen addresses, comma separated")
 	httpAddr := flag.String("http", "127.0.0.1:8095", "address of the control API (/status, /tunnel/<id>)")
 	yacyURL := flag.String("yacy", "http://127.0.0.1:8096", "base URL of the sidecar connector of the local YaCy")

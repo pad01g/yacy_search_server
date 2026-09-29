@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YaCy improved-search</title>
+<meta name="description" content="Un fork expérimental de YaCy : un classement plus strict et plus équitable, la recherche CJK, des pairs et des documents signés, des listes de confiance de coordinateurs et la traversée de NAT via un relais libp2p, mesurés dans des réseaux docker compose reproductibles.">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="alternate" hreflang="ja" href="../ja/">
+<link rel="alternate" hreflang="zh-Hans" href="../zh/">
+<link rel="alternate" hreflang="es" href="../es/">
+<link rel="alternate" hreflang="pt" href="../pt/">
+<link rel="alternate" hreflang="ko" href="../ko/">
+<link rel="alternate" hreflang="de" href="../de/">
+<link rel="alternate" hreflang="fr" href="../fr/">
+<link rel="describedby" type="text/markdown" href="../llms.txt">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <a class="brand" href="./">YaCy improved-search</a>
+  <nav>
+    <a href="./" aria-current="page">Présentation</a>
+    <a href="join.html">Rejoindre</a>
+    <a href="../design.html">Conception confiance &amp; NAT (en anglais)</a>
+    <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">Code</a>
+    <a href="https://github.com/pad01g/yacy-lab">Labo</a>
+  </nav>
+  <nav class="langs" aria-label="Langue">
+    <a href="../" hreflang="en" lang="en">English</a>
+    <a href="../ja/" hreflang="ja" lang="ja">日本語</a>
+    <a href="../zh/" hreflang="zh-Hans" lang="zh-Hans">简体中文</a>
+    <a href="../es/" hreflang="es" lang="es">Español</a>
+    <a href="../pt/" hreflang="pt" lang="pt">Português</a>
+    <a href="../ko/" hreflang="ko" lang="ko">한국어</a>
+    <a href="../de/" hreflang="de" lang="de">Deutsch</a>
+    <a href="../fr/" hreflang="fr" lang="fr" aria-current="true">Français</a>
+  </nav>
+</div></div>
+
+<main>
+<header class="hero">
+  <h1>Un fork expérimental de YaCy : meilleur classement, résultats signés, pairs derrière un NAT</h1>
+  <p class="lead">Un fork de <a href="https://github.com/yacy/yacy_search_server">YaCy</a> qui corrige des faiblesses mesurées sur le réseau public, ajoute une couche de confiance permettant de filtrer les résultats falsifiés et le spam, et permet aux pairs situés derrière un NAT de participer via un relais. Chaque affirmation de cette page est mesurée dans des réseaux pair-à-pair fermés que chacun peut reconstruire avec docker compose.</p>
+  <div class="buttons">
+    <a class="button" href="#try">Essayer la démo</a>
+    <a class="button" href="join.html">Rejoindre le réseau</a>
+    <a class="button secondary" href="#results">Voir les résultats</a>
+    <a class="button secondary" href="../design.html">Lire la conception (en anglais)</a>
+  </div>
+</header>
+
+<div class="note">
+  <p><strong>Statut : expérience.</strong> Ce fork n’est pas une version publiée par le projet YaCy et n’y est pas affilié. Il rompt délibérément la compatibilité avec le réseau YaCy public (identifiants de pairs, seeds, hachages de mots CJK). Il est partagé pour montrer, données à l’appui, ce que font les changements, afin que les idées puissent être discutées et, là où elles conviennent, proposées en amont par petits morceaux.</p>
+</div>
+
+<h2 id="why">Pourquoi</h2>
+<p>Mesuré sur le réseau YaCy public (freeworld) avec 16 requêtes, seuls <strong>11%</strong> des 10 premiers résultats contenaient tous les termes de la requête. En examinant les causes :</p>
+<ul>
+  <li>Les requêtes à plusieurs termes étaient envoyées à Solr avec un minimum match de 1 (une requête OR), à l’index local et à chaque pair distant.</li>
+  <li>Les scores Solr de chaque pair sont normalisés par rapport à son meilleur résultat, si bien qu’un pair qui n’a que des correspondances sur un seul terme place son meilleur au même niveau que les correspondances exactes des autres pairs.</li>
+  <li>Le texte japonais et chinois n’est découpé qu’aux espaces et à la ponctuation, si bien qu’une phrase entière devient un seul « mot » et que l’index de mots (RWI) ne peut pas la trouver.</li>
+  <li>Dans un réseau de nouveaux pairs, les pairs âgés de moins de 3 jours ne sont jamais interrogés lors d’une recherche dans l’index de mots, et les définitions de petits réseaux n’envoient les requêtes Solr distantes à personne.</li>
+  <li>Les résultats ne portent aucune preuve d’origine. Un pair peut renvoyer n’importe quelle URL avec n’importe quel titre pour n’importe quelle requête, et des seeds peuvent être rejoués ou modifiés par des tiers.</li>
+  <li>Les pairs derrière un NAT ne peuvent être que « junior » : ils ne sont pas joignables, donc ce qu’ils indexent est invisible pour les autres.</li>
+</ul>
+
+<h2 id="changes">Ce qui a changé</h2>
+<div class="cards">
+  <div class="card"><h3>Classement</h3><p>Un minimum match plus strict, une pondération par couverture des termes après la normalisation par pair, une pondération contre les pages pauvres et la recherche sur tous les pairs des petits réseaux.</p></div>
+  <div class="card"><h3>CJK</h3><p>Le texte chinois, japonais et coréen est indexé et recherché sous forme de bigrammes chevauchants, dans Solr et dans l’index de mots.</p></div>
+  <div class="card"><h3>Confiance</h3><p>Des clés de pair Ed25519, des seeds signés, des listes de confiance signées par des coordinateurs avec des tags déclarés, et une signature d’auteur sur chaque document que le pair crawle.</p></div>
+  <div class="card"><h3>Traversée de NAT</h3><p>Un petit sidecar go-libp2p réserve un emplacement sur un circuit relay, pour que les pairs derrière un NAT répondent aux recherches.</p></div>
+</div>
+
+<h3>Qualité de recherche</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Symptôme</th><th>Cause</th><th>Changement</th></tr></thead>
+<tbody>
+<tr><td>Les pages qui correspondent à un seul terme (bourrage de mots-clés) sont classées en tête</td><td>Solr <code>mm=1</code> pour les requêtes à plusieurs termes</td><td>Minimum match <code>2&lt;-1 5&lt;80%</code> : avec deux termes, les deux doivent correspondre ; avec 3 à 5 termes, un peut manquer (<code>search.ranking.solr.mm</code>, <code>.mm.cjk</code>)</td></tr>
+<tr><td>La meilleure correspondance partielle d’un pair est classée comme les correspondances exactes des autres pairs</td><td>Normalisation des scores par pair</td><td>Multiplier le score normalisé par (termes trouvés / termes de la requête)², au moins 0.05, et jamais en dessous de ce que garantit le minimum match (<code>search.ranking.coverage.exponent</code>)</td></tr>
+<tr><td>Japonais / chinois introuvables dans l’index de mots</td><td>Pas de segmentation en mots pour le CJK</td><td>Bigrammes chevauchants dans l’index de mots et dans la requête ; <code>CJKWidthFilter</code> + <code>CJKBigramFilter</code> dans le schéma Solr</td></tr>
+<tr><td>Les pages pauvres contenant toute la requête dans leur titre (listes de tags) sont classées en tête</td><td>Le <code>qf</code> par défaut pondère title^5 et h1^5 (et host ^6, nom de fichier de l’URL ^4, chemin ^3) face à text^1</td><td>Les résultats de moins de 100 mots sont pondérés par mots / 100, au moins 0.1 (<code>search.ranking.thin.words</code>) ; comptage des mots CJK corrigé (il comptait les espaces)</td></tr>
+<tr><td>Un réseau de nouveaux pairs ne cherche jamais dans les index de mots des autres pairs</td><td>La recherche DHT exige des pairs âgés de plus de 3 jours</td><td>Configurable (<code>remotesearch.dht.minage</code>, 3 par défaut)</td></tr>
+<tr><td>Les petits réseaux n’envoient les requêtes Solr distantes à personne, ou ignorent les cibles DHT</td><td>La formule du nombre de cibles donne 0 ; les cibles DHT étaient exclues de Solr</td><td>Les réseaux jusqu’à 32 pairs interrogent chaque pair de confiance connecté (chaque pair en mode ouvert), cibles DHT comprises</td></tr>
+</tbody></table></div>
+
+<h3>Couche de confiance</h3>
+<ul>
+  <li><strong>Identité des pairs.</strong> Chaque pair possède une clé Ed25519. Son hachage de pair de 12 caractères est dérivé de la clé publique, et le cœur de son seed (nom, ports, clé, joignabilité, tags déclarés) est signé. Les seeds non signés sont rejetés par défaut. Un challenge hello prouve que le détenteur de la clé répond à une adresse.</li>
+  <li><strong>Listes de confiance.</strong> Les utilisateurs configurent des clés de coordinateurs. Un coordinateur délègue à des opérateurs, et les opérateurs signent des listes de pairs de confiance avec une priorité et des tags déclarés comme <code>ads</code> ou <code>proxy:&lt;engine&gt;</code>. Les listes sont versionnées au lieu d’expirer et se propagent de pair en pair.</li>
+  <li><strong>Signatures d’auteur.</strong> Le pair qui crawle une page signe son URL, son titre et un filtre de Bloom de ses mots. Par défaut, un résultat n’est affiché que si sa signature est valide et que son auteur fait partie de l’ensemble de confiance (exceptions : les documents non signés de l’index propre du pair qui ne sont pas arrivés par la DHT comptent comme les siens, et les résultats de moteurs de recherche externes sont marqués « externe »). Un pair qui stocke un document pour la DHT ne peut pas le falsifier. Il peut seulement le retenir.</li>
+  <li><strong>Mode ouvert.</strong> Les résultats non signés ou non fiables peuvent être affichés, marqués « non vérifié » et toujours classés sous les résultats vérifiés. Les résultats portant une signature falsifiée ne sont jamais affichés.</li>
+</ul>
+
+<h3>Traversée de NAT</h3>
+<p>Un processus sidecar (Go, go-libp2p) tourne à côté de YaCy avec la même clé. Derrière un NAT, il réserve un emplacement sur un circuit relay v2 et annonce l’adresse du circuit dans le seed signé (<code>Reach=relay</code>). Les autres pairs ouvrent vers lui un port de tunnel local et utilisent du HTTP ordinaire, si bien que les clients existants de YaCy fonctionnent sans modification. Par défaut, ces pairs ne font que répondre aux recherches. Ils ne stockent pas de données DHT, sauf s’ils l’activent.</p>
+<p>Voir la <a href="../design.html">conception confiance et NAT (en anglais)</a> pour les détails.</p>
+
+<h2 id="results">Résultats</h2>
+<p>Deux expériences dans <a href="https://github.com/pad01g/yacy-lab">yacy-lab</a>. Toutes deux exécutent des réseaux fermés dans docker compose, avec un corpus et un jeu de requêtes déterministes.</p>
+
+<h3>Qualité de recherche : upstream contre fork, 3 pairs chacun</h3>
+<p>Chaque pair crawle un site. Les requêtes sont envoyées au pair 1 avec <code>resource=global</code>, et la plupart des pages pertinentes se trouvent sur les autres pairs. Le corpus contient deux sortes de leurres : des pages bourrées d’un seul terme de la requête, et des pages pauvres d’« archive de tags » contenant toute la requête dans leur titre. Moyenne sur 11 requêtes (6 en anglais, 4 en japonais, 1 en chinois), 2 exécutions au résultat identique sauf mention contraire.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Cluster / chemin</th><th class="num">R-précision ↑</th><th class="num">Recall@10 ↑</th><th class="num">Leurres dans le top R ↓</th><th class="num">Tous les termes dans le top 10 ↑</th></tr></thead>
+<tbody>
+<tr><td>upstream, par défaut</td><td class="num">0.52</td><td class="num">0.96</td><td class="num">0.48</td><td class="num">0.42</td></tr>
+<tr class="fork"><td>fork, par défaut</td><td class="num">0.79–0.86</td><td class="num">1.00</td><td class="num">0.14–0.21</td><td class="num">0.75</td></tr>
+<tr><td>upstream, index de mots seul</td><td class="num">0.02</td><td class="num">0.02</td><td class="num">0.00</td><td class="num">0.09</td></tr>
+<tr class="fork"><td>fork, index de mots seul</td><td class="num">0.93</td><td class="num">0.95</td><td class="num">0.07</td><td class="num">0.77</td></tr>
+</tbody></table></div>
+<ul>
+  <li>Pages bourrées de mots-clés dans le top 5 (somme sur les 11 requêtes) : upstream <span class="bad">14</span>, fork <span class="good">0</span>.</li>
+  <li>Les pages pauvres d’archive de tags descendent mais restent dans le top 5. Leur rang moyen est de 4.5 dans la recherche par défaut et de 5.0 avec l’index de mots seul. Avec Solr seul, il passe de 2.0 sans la pondération des pages pauvres à 3.1 avec celle-ci. Elles restent classées au-dessus de pages pertinentes dont le titre ne contient pas les termes de la requête. Une pondération plus forte les ferait descendre davantage mais pénaliserait aussi les pages courtes légitimes, c’est pourquoi la valeur par défaut reste modérée.</li>
+  <li>L’upstream ne peut pas utiliser les index de mots des autres pairs dans un réseau de nouveaux pairs, et ne peut pas du tout y trouver de mots japonais ou chinois.</li>
+  <li>La valeur par défaut du minimum match a été choisie sur ce corpus. Reste à mesurer sur le réseau public si elle y convient.</li>
+</ul>
+
+<h3>Confiance et NAT : 6 pairs du fork, un relais et un NAT</h3>
+<p>Trois pairs de confiance, un pair de confiance qui déclare <code>ads</code>, un pair signé mais non fiable qui crawle du spam et implante des documents avec une signature empruntée, et un pair derrière un routeur MASQUERADE. <strong>Les 26 vérifications passent toutes</strong>, entre autres :</p>
+<ul>
+  <li>Les identifiants de pairs dérivent des clés. Le spam du pair non fiable n’est pas affiché par défaut, pas même lorsqu’un pair de confiance en détient une copie.</li>
+  <li>En mode ouvert, le spam apparaît marqué non vérifié et sous chaque résultat vérifié. Le document à la signature empruntée n’apparaît jamais.</li>
+  <li>Les résultats du pair <code>ads</code> portent le tag, et <code>excludeTags=ads</code> les retire.</li>
+  <li>Le pair derrière le NAT n’est pas joignable directement, mais ses pages sont trouvées via le relais, et il reste connecté.</li>
+  <li>Une nouvelle version de liste se propage par le seul échange entre pairs. Révoquer un opérateur retire les résultats de ses pairs.</li>
+</ul>
+
+<h2 id="try">Essayer</h2>
+<p>La démo démarre les deux réseaux (3 pairs upstream, et la configuration confiance et NAT du fork) sur une seule machine et place une page de recherche devant eux. Il vous faut Docker avec environ 7&nbsp;Go de mémoire.</p>
+<pre><code>git clone https://github.com/pad01g/yacy_search_server.git yacy
+git clone https://github.com/pad01g/yacy-lab.git
+cd yacy
+git checkout baseline        &amp;&amp; docker build -t yacy-lab/upstream:baseline -f docker/Dockerfile .
+git checkout improved-search &amp;&amp; docker build -t yacy-lab/fork:latest -f docker/Dockerfile .
+docker build -t yacy-lab/sidecar:latest sidecar/
+cd ../yacy-lab
+docker compose -f compose.demo.yaml -p yacydemo up -d
+# ouvrir http://localhost:8800 (la mise en place prend environ 10 minutes et affiche sa progression)</code></pre>
+<figure>
+  <img src="../assets/demo.png" alt="La page de démo : la même requête envoyée au réseau upstream (à gauche) et au fork (à droite). L’upstream affiche d’abord des pages de spam ; le fork affiche d’abord des pages pertinentes vérifiées et, en mode ouvert, le spam en dessous, marqué non vérifié." loading="lazy">
+  <figcaption>« bitcoin lightning channel » en mode ouvert. À gauche : l’upstream affiche d’abord le spam. À droite : le fork affiche d’abord les résultats vérifiés, et le spam, marqué non vérifié, en dessous.</figcaption>
+</figure>
+<p>La page permet aussi de modifier la confiance : choisir à quels coordinateurs le pair qui cherche fait confiance (un second coordinateur ne liste que le pair de spam, donc lui faire confiance rend le spam « vérifié »), modifier et re-signer la liste de confiance, remettre la nouvelle version à un pair et la regarder se propager, et révoquer ou rétablir la délégation de l’opérateur.</p>
+<p>Les expériences elles-mêmes : <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code> (qualité de recherche) et <code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code> (confiance et NAT). Voir le <a href="https://github.com/pad01g/yacy-lab#readme">README du labo</a>.</p>
+
+<h2 id="join">Rejoindre : aucune autorisation nécessaire</h2>
+<p>N’importe qui, personne ou agent, peut faire tourner un pair, le connecter avec l’URL d’un membre (<code>p2p.bootstrap.peers</code>, y compris à travers un réseau Tailscale), indexer et signer ses propres pages et services, et gérer son propre coordinateur ou opérateur : un coordinateur n’est qu’une clé et un fichier signé à n’importe quelle URL, sans serveur. Les publicités déclarées (tag <code>ads</code>) sont autorisées ; les utilisateurs choisissent à quelles listes ils font confiance. <a href="join.html">Comment rejoindre</a> · pull requests bienvenues.</p>
+
+<h2 id="agents">Pour les agents IA</h2>
+<p>Un agent peut faire tourner son propre pair et l’utiliser comme outil de recherche, sans API de recherche ni clé d’API :</p>
+<ul>
+  <li><strong>Serveur MCP</strong> (<code>io.github.pad01g/yacy-search</code>) : <code>docker run -i --rm --network yacy -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD=&lt;votre mot de passe&gt; ghcr.io/pad01g/yacy-search-mcp:0.2.0</code> (avec le pair démarré par <code>docker run -d --name yacy --network yacy -p 127.0.0.1:8090:8090 -v yacy_data:/opt/yacy_search_server/DATA ghcr.io/pad01g/yacy-improved-search:latest</code> ; changez d’abord le mot de passe par défaut <code>yacy</code>). Outils : <code>search</code>, <code>crawl</code>, <code>index_status</code>, <code>peers</code>, <code>get_ranking_settings</code>, <code>set_ranking_setting</code>, <code>evaluate_ranking</code>, <code>trust_status</code>. Il tourne à côté de l’agent et dialogue avec le pair de l’agent ; il n’y a aucun service central.</li>
+  <li><strong>Skill d’agent</strong> : <code>npx skills add pad01g/yacy-lab</code> installe <a href="https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md">yacy-p2p-search</a> (démarrer un pair, crawler, chercher, évaluer et ajuster le classement).</li>
+  <li><strong>Registre de confiance</strong> : <a href="https://github.com/pad01g/yacy-trust">pad01g/yacy-trust</a>. Une pull request fusionnée liste votre pair ou fait de vous un opérateur qui se porte garant de pairs.</li>
+  <li>Résumé lisible par machine : <a href="../llms.txt">llms.txt</a>.</li>
+</ul>
+
+<h2 id="limits">Limites</h2>
+<ul>
+  <li>Incompatible par défaut avec le réseau YaCy public (seeds non signés rejetés, hachages de mots CJK modifiés). Le mode ouvert peut interroger les anciens pairs, mais uniquement en tant que résultats non vérifiés.</li>
+  <li>Sans coordinateurs configurés, un pair ne fait confiance qu’à ses propres documents. Les réseaux fermés peuvent utiliser <code>trust.signedOnly=true</code>. Un réseau public a besoin de quelqu’un qui joue le rôle de coordinateur.</li>
+  <li>Le corpus est synthétique et petit (160 pages). Il reproduit les faiblesses constatées sur le réseau public. Il ne prédit pas l’ampleur de l’amélioration sur celui-ci.</li>
+  <li>Le test NAT utilise un seul routeur MASQUERADE, pas de vrais routeurs domestiques. Le hole punching (DCUtR) est activé mais pas mesuré.</li>
+  <li>Un auteur de confiance peut toujours signer un contenu faux (les tags et l’audit sont la réponse). Un pair qui stocke des documents peut toujours retenir des résultats.</li>
+</ul>
+
+<h2 id="links">Liens</h2>
+<ul>
+  <li>Code : <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">pad01g/yacy_search_server</a>, branche <code>improved-search</code> (changements listés dans <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/FORK.md">FORK.md</a>)</li>
+  <li>Expériences et démo : <a href="https://github.com/pad01g/yacy-lab">pad01g/yacy-lab</a></li>
+  <li>Document de conception complet (en japonais) : <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/docs/trust-and-nat.md">docs/trust-and-nat.md</a></li>
+  <li>Upstream : <a href="https://github.com/yacy/yacy_search_server">yacy/yacy_search_server</a> · <a href="https://community.searchlab.eu/">forum YaCy</a></li>
+</ul>
+</main>
+<footer>YaCy est un logiciel libre sous GPL. Ce fork conserve ses licences. Sans affiliation avec le projet YaCy.</footer>
+</body>
+</html>

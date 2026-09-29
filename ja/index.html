@@ -6,6 +6,13 @@
 <title>YaCy improved-search</title>
 <meta name="description" content="YaCy の実験的なフォーク。順位付けの改善、日本語・中国語の検索、ピアと文書の署名、コーディネータの信頼の一覧、libp2p のリレーによる NAT 越えを、docker compose で再現できる閉じた網で測った。">
 <link rel="alternate" hreflang="en" href="../">
+<link rel="alternate" hreflang="ja" href="../ja/">
+<link rel="alternate" hreflang="zh-Hans" href="../zh/">
+<link rel="alternate" hreflang="es" href="../es/">
+<link rel="alternate" hreflang="pt" href="../pt/">
+<link rel="alternate" hreflang="ko" href="../ko/">
+<link rel="alternate" hreflang="de" href="../de/">
+<link rel="alternate" hreflang="fr" href="../fr/">
 <link rel="describedby" type="text/markdown" href="../llms.txt">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
@@ -14,11 +21,21 @@
   <a class="brand" href="./">YaCy improved-search</a>
   <nav>
     <a href="./" aria-current="page">概要</a>
+    <a href="join.html">参加する</a>
     <a href="design.html">信頼と NAT 越えの設計</a>
     <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">コード</a>
     <a href="https://github.com/pad01g/yacy-lab">実験</a>
   </nav>
-  <a class="lang" href="../" hreflang="en" lang="en">English</a>
+  <nav class="langs" aria-label="言語">
+    <a href="../" hreflang="en" lang="en">English</a>
+    <a href="../ja/" hreflang="ja" lang="ja" aria-current="true">日本語</a>
+    <a href="../zh/" hreflang="zh-Hans" lang="zh-Hans">简体中文</a>
+    <a href="../es/" hreflang="es" lang="es">Español</a>
+    <a href="../pt/" hreflang="pt" lang="pt">Português</a>
+    <a href="../ko/" hreflang="ko" lang="ko">한국어</a>
+    <a href="../de/" hreflang="de" lang="de">Deutsch</a>
+    <a href="../fr/" hreflang="fr" lang="fr">Français</a>
+  </nav>
 </div></div>
 
 <main>
@@ -27,6 +44,7 @@
   <p class="lead"><a href="https://github.com/yacy/yacy_search_server">YaCy</a> のフォーク。公開網で測って見つけた弱点を直し、偽の結果やスパムを除ける信頼の仕組みを足し、NAT の内側のピアもリレー経由で参加できるようにした。このページの主張はすべて、docker compose で誰でも組み直せる閉じた P2P 網で測ったもの。</p>
   <div class="buttons">
     <a class="button" href="#try">デモを動かす</a>
+    <a class="button" href="join.html">網に参加する</a>
     <a class="button secondary" href="#results">結果を見る</a>
     <a class="button secondary" href="design.html">設計を読む</a>
   </div>
@@ -126,6 +144,9 @@ docker compose -f compose.demo.yaml -p yacydemo up -d
 </figure>
 <p>画面では信頼の設定も変えられる。問い合わせ元が信頼するコーディネータを選ぶ（もう 1 つのコーディネータの一覧はスパムのピアだけで、それも信頼するとスパムが「検証済み」になる）。信頼の一覧を編集して署名し直す。新しい版を 1 つのピアにだけ渡して広がるのを見る。オペレータへの委任を失効させる、し直す。</p>
 <p>実験そのもの: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code>（検索品質）、<code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code>（信頼と NAT 越え）。詳しくは <a href="https://github.com/pad01g/yacy-lab#readme">yacy-lab の README</a>。</p>
+
+<h2 id="join">参加する: 許可は要らない</h2>
+<p>人でもエージェントでも、誰でもピアを立てて、網の誰か 1 台の URL（<code>p2p.bootstrap.peers</code>。Tailscale の網でも）でつなぎ、自分の頁やサービスを索引して署名し、自分でコーディネータやオペレータになれる。コーディネータは鍵と、どこかの URL に置いた署名済みのファイルだけで、サーバーは要らない。宣言した広告（<code>ads</code> タグ）も出してよい。誰の一覧を信頼するかは利用者が選ぶ。<a href="join.html">参加のしかた</a> · pull request 歓迎。</p>
 
 <h2 id="agents">AI エージェント向け</h2>
 <p>エージェントは自分のピアを動かし、検索 API も API キーも無しに検索の道具として使える。</p>

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YaCy improved-search</title>
+<meta name="description" content="실험적인 YaCy 포크: 더 엄격하고 공정한 순위, CJK 검색, 서명된 피어와 문서, 코디네이터(coordinator)의 신뢰 목록, libp2p 릴레이를 통한 NAT 통과를 재현 가능한 docker compose 네트워크에서 측정했습니다.">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="alternate" hreflang="ja" href="../ja/">
+<link rel="alternate" hreflang="zh-Hans" href="../zh/">
+<link rel="alternate" hreflang="es" href="../es/">
+<link rel="alternate" hreflang="pt" href="../pt/">
+<link rel="alternate" hreflang="ko" href="../ko/">
+<link rel="alternate" hreflang="de" href="../de/">
+<link rel="alternate" hreflang="fr" href="../fr/">
+<link rel="describedby" type="text/markdown" href="../llms.txt">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <a class="brand" href="./">YaCy improved-search</a>
+  <nav>
+    <a href="./" aria-current="page">개요</a>
+    <a href="join.html">참여하기</a>
+    <a href="../design.html">신뢰 및 NAT 설계 (영어)</a>
+    <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">코드</a>
+    <a href="https://github.com/pad01g/yacy-lab">실험</a>
+  </nav>
+  <nav class="langs" aria-label="언어">
+    <a href="../" hreflang="en" lang="en">English</a>
+    <a href="../ja/" hreflang="ja" lang="ja">日本語</a>
+    <a href="../zh/" hreflang="zh-Hans" lang="zh-Hans">简体中文</a>
+    <a href="../es/" hreflang="es" lang="es">Español</a>
+    <a href="../pt/" hreflang="pt" lang="pt">Português</a>
+    <a href="../ko/" hreflang="ko" lang="ko" aria-current="true">한국어</a>
+    <a href="../de/" hreflang="de" lang="de">Deutsch</a>
+    <a href="../fr/" hreflang="fr" lang="fr">Français</a>
+  </nav>
+</div></div>
+
+<main>
+<header class="hero">
+  <h1>실험적인 YaCy 포크: 더 나은 순위, 서명된 결과, NAT 뒤의 피어</h1>
+  <p class="lead"><a href="https://github.com/yacy/yacy_search_server">YaCy</a>의 포크입니다. 공개 네트워크에서 측정한 약점을 고치고, 위조된 결과와 스팸 결과를 걸러낼 수 있도록 신뢰 계층을 추가했으며, NAT 뒤의 피어도 릴레이를 통해 참여할 수 있게 했습니다. 이 페이지의 모든 주장은 누구나 docker compose로 다시 구성할 수 있는 폐쇄형 P2P 네트워크에서 측정한 것입니다.</p>
+  <div class="buttons">
+    <a class="button" href="#try">데모 실행하기</a>
+    <a class="button" href="join.html">네트워크에 참여하기</a>
+    <a class="button secondary" href="#results">결과 보기</a>
+    <a class="button secondary" href="../design.html">설계 읽기 (영어)</a>
+  </div>
+</header>
+
+<div class="note">
+  <p><strong>상태: 실험.</strong> 이것은 YaCy 프로젝트의 릴리스가 아니며, YaCy 프로젝트와 관련이 없습니다. 공개 YaCy 네트워크와의 호환성을 의도적으로 깨뜨립니다(피어 ID, seed, CJK 단어 해시). 변경 사항이 무엇을 하는지 데이터로 보여 주고, 아이디어를 논의하며, 적합한 부분은 작은 단위로 업스트림에 제안하기 위해 공개합니다.</p>
+</div>
+
+<h2 id="why">왜</h2>
+<p>공개 YaCy 네트워크(freeworld)에서 16개 쿼리로 측정한 결과, 상위 10개 결과 중 모든 검색어를 포함한 것은 <strong>11%</strong>에 불과했습니다. 원인을 살펴보면:</p>
+<ul>
+  <li>여러 단어로 된 쿼리가 최소 일치(minimum match) 1, 즉 OR 쿼리로 Solr에 전송되었습니다. 자신의 인덱스에도, 모든 원격 피어에도 마찬가지였습니다.</li>
+  <li>각 피어의 Solr 점수는 그 피어의 최고 결과를 기준으로 정규화되므로, 한 단어만 일치하는 결과밖에 없는 피어도 자신의 최고 결과를 다른 피어의 완전 일치 결과와 같은 수준에 놓습니다.</li>
+  <li>일본어와 중국어 텍스트는 공백과 구두점에서만 분리되므로 문장 전체가 하나의 "단어"가 되고, 단어 인덱스(RWI)는 이를 찾을 수 없습니다.</li>
+  <li>새 피어로 이루어진 네트워크에서는 생성된 지 3일이 안 된 피어가 단어 인덱스 검색에서 결코 질의되지 않으며, 작은 네트워크 정의에서는 원격 Solr 쿼리가 아무에게도 전송되지 않습니다.</li>
+  <li>결과에는 출처 증명이 없습니다. 피어는 어떤 쿼리에 대해서든 임의의 URL과 임의의 제목을 반환할 수 있고, seed는 제3자가 재전송하거나 변조할 수 있습니다.</li>
+  <li>NAT 뒤의 피어는 "junior"만 될 수 있습니다. 외부에서 접근할 수 없으므로 이들이 인덱싱한 내용은 다른 피어에게 보이지 않습니다.</li>
+</ul>
+
+<h2 id="changes">변경된 점</h2>
+<div class="cards">
+  <div class="card"><h3>순위</h3><p>더 엄격한 최소 일치, 피어별 정규화 이후의 검색어 포함률 가중치, 내용이 빈약한 페이지에 대한 감점 가중치, 그리고 작은 네트워크에서 모든 피어 검색.</p></div>
+  <div class="card"><h3>CJK</h3><p>중국어, 일본어, 한국어 텍스트를 Solr와 단어 인덱스 모두에서 겹치는 바이그램(bigram)으로 인덱싱하고 검색합니다.</p></div>
+  <div class="card"><h3>신뢰</h3><p>Ed25519 피어 키, 서명된 seed, 선언된 태그가 포함된 코디네이터 서명 신뢰 목록, 그리고 피어가 크롤링하는 모든 문서에 대한 작성자 서명.</p></div>
+  <div class="card"><h3>NAT 통과</h3><p>작은 go-libp2p sidecar(보조 프로세스)가 circuit relay에 슬롯을 예약하여, NAT 뒤의 피어가 검색에 응답할 수 있게 합니다.</p></div>
+</div>
+
+<h3>검색 품질</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>증상</th><th>원인</th><th>변경</th></tr></thead>
+<tbody>
+<tr><td>한 단어만 일치하는 페이지(키워드 스터핑)가 최상위에 오름</td><td>여러 단어 쿼리에 Solr <code>mm=1</code> 사용</td><td>최소 일치 <code>2&lt;-1 5&lt;80%</code>: 두 단어는 모두 일치해야 하고, 3–5단어는 하나가 빠져도 됨(<code>search.ranking.solr.mm</code>, <code>.mm.cjk</code>)</td></tr>
+<tr><td>한 피어의 최고 부분 일치가 다른 피어의 완전 일치와 비슷한 순위를 받음</td><td>피어별 점수 정규화</td><td>정규화된 점수에 (찾은 단어 수 / 쿼리 단어 수)²를 곱하되, 최소 0.05이며 최소 일치가 보장하는 값보다 낮아지지 않게 함(<code>search.ranking.coverage.exponent</code>)</td></tr>
+<tr><td>단어 인덱스에서 일본어 / 중국어를 찾을 수 없음</td><td>CJK에 대한 단어 분할 없음</td><td>단어 인덱스와 쿼리에서 겹치는 바이그램 사용; Solr 스키마에 <code>CJKWidthFilter</code> + <code>CJKBigramFilter</code></td></tr>
+<tr><td>제목에 쿼리 전체가 들어 있는 빈약한 페이지(태그 목록)가 최상위에 오름</td><td>기본 <code>qf</code>가 title^5, h1^5(그리고 host ^6, URL 파일 이름 ^4, 경로 ^3)에 text^1보다 큰 가중치를 줌</td><td>100단어 미만의 결과에 단어 수 / 100(최소 0.1)의 가중치를 적용(<code>search.ranking.thin.words</code>); CJK 단어 수 계산 수정(공백을 세고 있었음)</td></tr>
+<tr><td>새 피어로 이루어진 네트워크가 다른 피어의 단어 인덱스를 전혀 검색하지 않음</td><td>DHT 검색에는 3일보다 오래된 피어가 필요함</td><td>설정 가능(<code>remotesearch.dht.minage</code>, 기본값 3)</td></tr>
+<tr><td>작은 네트워크가 원격 Solr 쿼리를 아무에게도 보내지 않거나 DHT 대상을 건너뜀</td><td>대상 수 공식이 0을 반환; DHT 대상이 Solr에서 제외되어 있었음</td><td>피어가 32개 이하인 네트워크는 연결된 모든 신뢰 피어(개방 모드에서는 모든 피어)에 질의하며, DHT 대상도 포함함</td></tr>
+</tbody></table></div>
+
+<h3>신뢰 계층</h3>
+<ul>
+  <li><strong>피어 신원.</strong> 각 피어는 Ed25519 키를 가집니다. 12자리 피어 해시는 공개 키에서 파생되며, seed의 핵심 부분(이름, 포트, 키, 도달 가능성, 선언된 태그)은 서명됩니다. 서명되지 않은 seed는 기본적으로 거부됩니다. hello 챌린지는 키 소유자가 해당 주소에서 응답한다는 것을 증명합니다.</li>
+  <li><strong>신뢰 목록.</strong> 사용자는 코디네이터 키를 설정합니다. 코디네이터는 운영자(operator)에게 권한을 위임하고, 운영자는 우선순위와 <code>ads</code>나 <code>proxy:&lt;엔진&gt;</code> 같은 선언된 태그를 붙인 신뢰 피어 목록에 서명합니다. 목록은 만료되는 대신 버전으로 관리되며, 피어에서 피어로 퍼집니다.</li>
+  <li><strong>작성자 서명.</strong> 페이지를 크롤링한 피어가 그 페이지의 URL, 제목, 그리고 단어들의 Bloom filter에 서명합니다. 기본적으로 결과는 서명이 유효하고 작성자가 신뢰 집합에 있을 때만 표시됩니다(예외: 피어 자신의 인덱스에 있으면서 DHT를 통해 오지 않은 서명 없는 문서는 자신의 문서로 간주되고, 외부 검색 엔진의 결과는 "external"로 표시됩니다). DHT를 위해 문서를 저장하는 피어는 문서를 위조할 수 없습니다. 보류할 수 있을 뿐입니다.</li>
+  <li><strong>개방 모드.</strong> 서명되지 않았거나 신뢰되지 않은 결과도 표시할 수 있으며, 이들은 "unverified"로 표시되고 항상 검증된 결과보다 아래에 배치됩니다. 서명이 위조된 결과는 절대 표시되지 않습니다.</li>
+</ul>
+
+<h3>NAT 통과</h3>
+<p>sidecar 프로세스(Go, go-libp2p)가 같은 키로 YaCy 옆에서 실행됩니다. NAT 뒤에 있을 때는 circuit relay v2에 슬롯을 예약하고, 서명된 seed에 circuit 주소를 알립니다(<code>Reach=relay</code>). 다른 피어는 그 피어로 가는 로컬 터널 포트를 열고 일반 HTTP를 사용하므로, YaCy의 기존 클라이언트가 변경 없이 동작합니다. 기본적으로 이런 피어는 검색에만 응답합니다. 직접 선택(opt in)하지 않는 한 DHT 데이터를 저장하지 않습니다.</p>
+<p>자세한 내용은 <a href="../design.html">신뢰 및 NAT 설계 (영어)</a>를 참조하세요.</p>
+
+<h2 id="results">결과</h2>
+<p><a href="https://github.com/pad01g/yacy-lab">yacy-lab</a>의 두 가지 실험입니다. 둘 다 결정적인(deterministic) 코퍼스와 쿼리 세트로 docker compose에서 폐쇄형 네트워크를 실행합니다.</p>
+
+<h3>검색 품질: 업스트림 대 포크, 각 3개 피어</h3>
+<p>각 피어는 하나의 사이트를 크롤링합니다. 쿼리는 <code>resource=global</code>로 피어 1에 보내며, 관련 페이지 대부분은 다른 피어에 있습니다. 코퍼스에는 두 종류의 미끼가 있습니다. 한 검색어로 채워진 페이지와, 제목에 쿼리 전체가 들어 있는 빈약한 "태그 아카이브" 페이지입니다. 11개 쿼리(영어 6, 일본어 4, 중국어 1)의 평균이며, 2회 실행했고 별도 표시한 곳을 제외하면 결과가 같았습니다.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>클러스터 / 경로</th><th class="num">R-precision ↑</th><th class="num">Recall@10 ↑</th><th class="num">상위 R개 중 미끼 ↓</th><th class="num">상위 10개에 모든 단어 포함 ↑</th></tr></thead>
+<tbody>
+<tr><td>업스트림, 기본</td><td class="num">0.52</td><td class="num">0.96</td><td class="num">0.48</td><td class="num">0.42</td></tr>
+<tr class="fork"><td>포크, 기본</td><td class="num">0.79–0.86</td><td class="num">1.00</td><td class="num">0.14–0.21</td><td class="num">0.75</td></tr>
+<tr><td>업스트림, 단어 인덱스만</td><td class="num">0.02</td><td class="num">0.02</td><td class="num">0.00</td><td class="num">0.09</td></tr>
+<tr class="fork"><td>포크, 단어 인덱스만</td><td class="num">0.93</td><td class="num">0.95</td><td class="num">0.07</td><td class="num">0.77</td></tr>
+</tbody></table></div>
+<ul>
+  <li>상위 5개에 든 키워드 스터핑 페이지(11개 쿼리 합계): 업스트림 <span class="bad">14</span>, 포크 <span class="good">0</span>.</li>
+  <li>빈약한 태그 아카이브 페이지는 순위가 내려가지만 상위 5개 안에 남습니다. 평균 순위는 기본 검색에서 4.5, 단어 인덱스만 사용할 때 5.0입니다. Solr만 사용할 때는 빈약한 페이지 가중치가 없을 때의 2.0에서 가중치를 적용하면 3.1이 됩니다. 여전히 제목에 검색어가 없는 관련 페이지보다는 위에 있습니다. 더 강한 가중치는 이들을 더 아래로 내리겠지만 정당한 짧은 페이지도 강등시키므로, 기본값은 약하게 유지합니다.</li>
+  <li>업스트림은 새 피어로 이루어진 네트워크에서 다른 피어의 단어 인덱스를 사용할 수 없고, 그 안에서 일본어나 중국어 단어를 전혀 찾을 수 없습니다.</li>
+  <li>최소 일치 기본값은 이 코퍼스에서 선택한 것입니다. 공개 네트워크에 적합한지는 아직 그곳에서 측정해야 합니다.</li>
+</ul>
+
+<h3>신뢰와 NAT: 포크 피어 6개, 릴레이 1개, NAT 1개</h3>
+<p>신뢰 피어 3개, <code>ads</code>를 선언한 신뢰 피어 1개, 서명은 되었지만 신뢰되지 않고 스팸을 크롤링하며 빌린 서명으로 문서를 심는 피어 1개, 그리고 MASQUERADE 라우터 뒤의 피어 1개입니다. <strong>26개 검사가 모두 통과</strong>했으며, 그중 일부는 다음과 같습니다.</p>
+<ul>
+  <li>피어 ID는 키에서 파생됩니다. 신뢰되지 않은 피어의 스팸은 기본적으로 표시되지 않으며, 신뢰 피어가 그 사본을 가지고 있어도 마찬가지입니다.</li>
+  <li>개방 모드에서는 스팸이 unverified로 표시되어 모든 검증된 결과보다 아래에 나타납니다. 빌린 서명을 가진 문서는 절대 나타나지 않습니다.</li>
+  <li><code>ads</code> 피어의 결과에는 해당 태그가 붙어 있으며, <code>excludeTags=ads</code>로 제거할 수 있습니다.</li>
+  <li>NAT 뒤의 피어는 직접 접근할 수 없지만, 그 페이지는 릴레이를 통해 검색되며 연결도 유지됩니다.</li>
+  <li>새 목록 버전은 피어 간 교환만으로 퍼집니다. 운영자를 철회하면 그 운영자의 피어들의 결과가 제거됩니다.</li>
+</ul>
+
+<h2 id="try">직접 해 보기</h2>
+<p>데모는 한 대의 머신에서 두 네트워크(업스트림 피어 3개, 그리고 포크의 신뢰 및 NAT 구성)를 시작하고 그 앞에 검색 페이지를 둡니다. 약 7&nbsp;GB의 메모리를 쓸 수 있는 Docker가 필요합니다.</p>
+<pre><code>git clone https://github.com/pad01g/yacy_search_server.git yacy
+git clone https://github.com/pad01g/yacy-lab.git
+cd yacy
+git checkout baseline        &amp;&amp; docker build -t yacy-lab/upstream:baseline -f docker/Dockerfile .
+git checkout improved-search &amp;&amp; docker build -t yacy-lab/fork:latest -f docker/Dockerfile .
+docker build -t yacy-lab/sidecar:latest sidecar/
+cd ../yacy-lab
+docker compose -f compose.demo.yaml -p yacydemo up -d
+# http://localhost:8800 을 엽니다 (초기 설정은 약 10분 걸리며 진행 상황이 표시됩니다)</code></pre>
+<figure>
+  <img src="../assets/demo.png" alt="데모 페이지: 같은 쿼리를 업스트림 네트워크(왼쪽)와 포크(오른쪽)에 보낸 모습. 업스트림은 스팸 페이지를 먼저 나열하고, 포크는 검증된 관련 페이지를 먼저 나열하며 개방 모드에서는 스팸을 그 아래에 unverified로 표시합니다." loading="lazy">
+  <figcaption>개방 모드에서의 "bitcoin lightning channel". 왼쪽: 업스트림은 스팸을 먼저 보여 줍니다. 오른쪽: 포크는 검증된 결과를 먼저 보여 주고, unverified로 표시된 스팸은 그 아래에 보여 줍니다.</figcaption>
+</figure>
+<p>이 페이지에서는 신뢰를 바꿔 볼 수도 있습니다. 검색하는 피어가 어느 코디네이터를 신뢰할지 선택하고(두 번째 코디네이터는 스팸 피어만 나열하므로, 이를 신뢰하면 스팸이 "verified"가 됩니다), 신뢰 목록을 편집하고 다시 서명하고, 새 버전을 한 피어에 넘겨 퍼지는 모습을 지켜보고, 운영자의 위임을 철회하거나 복원할 수 있습니다.</p>
+<p>실험 자체: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code>(검색 품질) 및 <code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code>(신뢰와 NAT). <a href="https://github.com/pad01g/yacy-lab#readme">lab README</a>를 참조하세요.</p>
+
+<h2 id="join">참여하기: 허가가 필요 없습니다</h2>
+<p>사람이든 에이전트든 누구나 피어를 실행하고, 한 멤버의 URL로 연결하고(<code>p2p.bootstrap.peers</code>, Tailscale 네트워크를 넘어서도 가능), 자신의 페이지와 서비스를 인덱싱하고 서명하며, 자신만의 코디네이터나 운영자를 운영할 수 있습니다. 코디네이터는 키 하나와 임의의 URL에 둔 서명된 파일 하나일 뿐이며, 서버가 필요 없습니다. 선언된 광고(<code>ads</code> 태그)는 허용됩니다. 누구의 목록을 신뢰할지는 사용자가 선택합니다. <a href="join.html">참여 방법</a> · pull request 환영합니다.</p>
+
+<h2 id="agents">AI 에이전트를 위해</h2>
+<p>에이전트는 검색 API나 API 키 없이 자신만의 피어를 실행하여 검색 도구로 사용할 수 있습니다.</p>
+<ul>
+  <li><strong>MCP 서버</strong>(<code>io.github.pad01g/yacy-search</code>): <code>docker run -i --rm --network yacy -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD=&lt;비밀번호&gt; ghcr.io/pad01g/yacy-search-mcp:0.2.0</code>(피어는 <code>docker run -d --name yacy --network yacy -p 127.0.0.1:8090:8090 -v yacy_data:/opt/yacy_search_server/DATA ghcr.io/pad01g/yacy-improved-search:latest</code>로 시작하며, 먼저 기본 비밀번호 <code>yacy</code>를 변경하세요). 도구: <code>search</code>, <code>crawl</code>, <code>index_status</code>, <code>peers</code>, <code>get_ranking_settings</code>, <code>set_ranking_setting</code>, <code>evaluate_ranking</code>, <code>trust_status</code>. 에이전트 옆에서 실행되어 에이전트 자신의 피어와 통신하며, 중앙 서비스는 없습니다.</li>
+  <li><strong>에이전트 skill</strong>: <code>npx skills add pad01g/yacy-lab</code>로 <a href="https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md">yacy-p2p-search</a>를 설치합니다(피어 시작, 크롤링, 검색, 순위 평가 및 조정).</li>
+  <li><strong>신뢰 레지스트리</strong>: <a href="https://github.com/pad01g/yacy-trust">pad01g/yacy-trust</a>. pull request가 병합되면 당신의 피어가 목록에 오르거나, 당신이 피어를 보증하는 운영자가 됩니다.</li>
+  <li>기계 판독용 요약: <a href="../llms.txt">llms.txt</a>.</li>
+</ul>
+
+<h2 id="limits">한계</h2>
+<ul>
+  <li>기본적으로 공개 YaCy 네트워크와 호환되지 않습니다(서명되지 않은 seed 거부, CJK 단어 해시 변경). 개방 모드로 기존 피어를 검색할 수 있지만, 결과는 unverified로만 표시됩니다.</li>
+  <li>코디네이터를 설정하지 않으면 피어는 자신의 문서만 신뢰합니다. 폐쇄형 네트워크는 <code>trust.signedOnly=true</code>를 사용할 수 있습니다. 공개 네트워크에는 코디네이터 역할을 맡을 누군가가 필요합니다.</li>
+  <li>코퍼스는 합성된 소규모(160페이지)입니다. 공개 네트워크에서 발견된 약점을 재현하지만, 그곳에서의 개선 폭을 예측하지는 않습니다.</li>
+  <li>NAT 테스트는 실제 가정용 라우터가 아닌 MASQUERADE 라우터 1대를 사용합니다. 홀 펀칭(DCUtR)은 활성화되어 있지만 측정하지 않았습니다.</li>
+  <li>신뢰된 작성자도 거짓 내용에 서명할 수 있습니다(태그와 감사로 대응합니다). 저장하는 피어는 여전히 결과를 보류할 수 있습니다.</li>
+</ul>
+
+<h2 id="links">링크</h2>
+<ul>
+  <li>코드: <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">pad01g/yacy_search_server</a>, 브랜치 <code>improved-search</code>(변경 사항은 <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/FORK.md">FORK.md</a>에 정리)</li>
+  <li>실험과 데모: <a href="https://github.com/pad01g/yacy-lab">pad01g/yacy-lab</a></li>
+  <li>전체 설계 문서(일본어): <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/docs/trust-and-nat.md">docs/trust-and-nat.md</a></li>
+  <li>업스트림: <a href="https://github.com/yacy/yacy_search_server">yacy/yacy_search_server</a> · <a href="https://community.searchlab.eu/">YaCy 포럼</a></li>
+</ul>
+</main>
+<footer>YaCy는 GPL 라이선스의 자유 소프트웨어입니다. 이 포크는 그 라이선스를 유지합니다. YaCy 프로젝트와 관련이 없습니다.</footer>
+</body>
+</html>

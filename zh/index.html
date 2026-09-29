@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YaCy improved-search</title>
+<meta name="description" content="一个实验性的 YaCy 分支：更严格、更公平的排序，CJK 搜索，签名的节点与文档，协调者（coordinator）的信任列表，以及经由 libp2p 中继的 NAT 穿透，全部在可复现的 docker compose 网络中测量。">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="alternate" hreflang="ja" href="../ja/">
+<link rel="alternate" hreflang="zh-Hans" href="../zh/">
+<link rel="alternate" hreflang="es" href="../es/">
+<link rel="alternate" hreflang="pt" href="../pt/">
+<link rel="alternate" hreflang="ko" href="../ko/">
+<link rel="alternate" hreflang="de" href="../de/">
+<link rel="alternate" hreflang="fr" href="../fr/">
+<link rel="describedby" type="text/markdown" href="../llms.txt">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <a class="brand" href="./">YaCy improved-search</a>
+  <nav>
+    <a href="./" aria-current="page">概览</a>
+    <a href="join.html">加入</a>
+    <a href="../design.html">信任与 NAT 设计 (English)</a>
+    <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">代码</a>
+    <a href="https://github.com/pad01g/yacy-lab">实验</a>
+  </nav>
+  <nav class="langs" aria-label="语言">
+    <a href="../" hreflang="en" lang="en">English</a>
+    <a href="../ja/" hreflang="ja" lang="ja">日本語</a>
+    <a href="../zh/" hreflang="zh-Hans" lang="zh-Hans" aria-current="true">简体中文</a>
+    <a href="../es/" hreflang="es" lang="es">Español</a>
+    <a href="../pt/" hreflang="pt" lang="pt">Português</a>
+    <a href="../ko/" hreflang="ko" lang="ko">한국어</a>
+    <a href="../de/" hreflang="de" lang="de">Deutsch</a>
+    <a href="../fr/" hreflang="fr" lang="fr">Français</a>
+  </nav>
+</div></div>
+
+<main>
+<header class="hero">
+  <h1>一个实验性的 YaCy 分支：更好的排序、签名的结果、NAT 后面的节点</h1>
+  <p class="lead">这是 <a href="https://github.com/yacy/yacy_search_server">YaCy</a> 的一个分支（fork）。它修正了在公共网络上测出的弱点，加入了一层信任机制以便过滤伪造结果和垃圾结果，并让 NAT 后面的节点通过中继参与网络。本页的每一项结论都是在封闭的 P2P 网络中测得的，任何人都可以用 docker compose 重建这些网络。</p>
+  <div class="buttons">
+    <a class="button" href="#try">试用演示</a>
+    <a class="button" href="join.html">加入网络</a>
+    <a class="button secondary" href="#results">查看结果</a>
+    <a class="button secondary" href="../design.html">阅读设计 (English)</a>
+  </div>
+</header>
+
+<div class="note">
+  <p><strong>状态：实验。</strong>这不是 YaCy 项目的发布版本，也与 YaCy 项目没有关联。它有意打破了与公共 YaCy 网络的兼容性（节点 ID、seed、CJK 词哈希）。公开它是为了用数据展示这些改动的效果，以便讨论其中的想法，并在合适的地方以小块的形式向上游提出。</p>
+</div>
+
+<h2 id="why">为什么</h2>
+<p>在公共 YaCy 网络（freeworld）上用 16 个查询测量，前 10 个结果中只有 <strong>11%</strong> 包含全部查询词。追查原因：</p>
+<ul>
+  <li>多词查询以最小匹配 1（即 OR 查询）发送给 Solr，无论是本地索引还是每个远程节点。</li>
+  <li>每个节点的 Solr 分数都按该节点的最佳命中归一化，因此一个只有单词匹配的节点会把它的最佳结果与其他节点的完全匹配放在同一水平。</li>
+  <li>日文和中文文本只在空格和标点处切分，于是整句话变成一个“词”，词索引（RWI）无法找到它。</li>
+  <li>在由新节点组成的网络中，年龄不足 3 天的节点在词索引搜索中永远不会被询问；而小的网络定义会把远程 Solr 查询发给零个节点。</li>
+  <li>结果不带任何来源证明。一个节点可以对任何查询返回任意 URL 和任意标题，而 seed 可以被第三方重放或篡改。</li>
+  <li>NAT 后面的节点只能是 “junior”：它们无法被访问，因此它们索引的内容对其他节点不可见。</li>
+</ul>
+
+<h2 id="changes">改了什么</h2>
+<div class="cards">
+  <div class="card"><h3>排序</h3><p>更严格的最小匹配、在每节点归一化之后按查询词覆盖率加权、对内容单薄页面的降权，以及在小网络中搜索所有节点。</p></div>
+  <div class="card"><h3>CJK</h3><p>中文、日文和韩文文本以重叠的二元组（bigram）进行索引和搜索，Solr 和词索引中都是如此。</p></div>
+  <div class="card"><h3>信任</h3><p>Ed25519 节点密钥、签名的 seed、由协调者签名并带有声明标签的信任列表，以及节点抓取（crawl）的每个文档上的作者签名。</p></div>
+  <div class="card"><h3>NAT 穿透</h3><p>一个小型的 go-libp2p sidecar（伴随进程）在 circuit relay 上预留一个槽位，使 NAT 后面的节点能够响应搜索。</p></div>
+</div>
+
+<h3>搜索质量</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>症状</th><th>原因</th><th>改动</th></tr></thead>
+<tbody>
+<tr><td>只匹配一个词的页面（关键词堆砌）排在最前</td><td>多词查询使用 Solr <code>mm=1</code></td><td>最小匹配 <code>2&lt;-1 5&lt;80%</code>：两个词必须都匹配，3–5 个词可以缺一个（<code>search.ranking.solr.mm</code>、<code>.mm.cjk</code>）</td></tr>
+<tr><td>某个节点的最佳部分匹配与其他节点的完全匹配排名相当</td><td>每节点分数归一化</td><td>将归一化后的分数乘以（找到的词数 / 查询词数）²，至少为 0.05，且不低于最小匹配所保证的值（<code>search.ranking.coverage.exponent</code>）</td></tr>
+<tr><td>词索引中找不到日文 / 中文</td><td>CJK 没有分词</td><td>在词索引和查询中使用重叠二元组；Solr schema 中使用 <code>CJKWidthFilter</code> + <code>CJKBigramFilter</code></td></tr>
+<tr><td>标题包含整个查询的单薄页面（标签列表）排在最前</td><td>默认 <code>qf</code> 给 title^5 和 h1^5（以及 host ^6、URL 文件名 ^4、路径 ^3）的权重，而 text 只有 ^1</td><td>少于 100 个词的结果按 词数 / 100 加权，至少为 0.1（<code>search.ranking.thin.words</code>）；修正了 CJK 词数统计（原来统计的是空格）</td></tr>
+<tr><td>由新节点组成的网络从不搜索其他节点的词索引</td><td>DHT 搜索需要年龄超过 3 天的节点</td><td>可配置（<code>remotesearch.dht.minage</code>，默认 3）</td></tr>
+<tr><td>小网络把远程 Solr 查询发给零个节点，或跳过 DHT 目标</td><td>目标数量公式得出 0；DHT 目标被排除在 Solr 之外</td><td>不超过 32 个节点的网络会询问每一个已连接的受信任节点（开放模式下为每一个节点），包括 DHT 目标</td></tr>
+</tbody></table></div>
+
+<h3>信任层</h3>
+<ul>
+  <li><strong>节点身份。</strong>每个节点都有一个 Ed25519 密钥。它 12 个字符的节点哈希由公钥派生，其 seed 的核心部分（名称、端口、密钥、可达性、声明的标签）经过签名。默认拒绝未签名的 seed。hello 质询证明密钥持有者确实在某个地址上应答。</li>
+  <li><strong>信任列表。</strong>用户配置协调者的密钥。协调者把权限委托给运营者（operator），运营者对受信任节点的列表签名，列表中带有优先级和声明的标签，例如 <code>ads</code> 或 <code>proxy:&lt;引擎&gt;</code>。列表采用版本号而非过期时间，并在节点之间逐个传播。</li>
+  <li><strong>作者签名。</strong>抓取页面的节点对页面的 URL、标题及其词的 Bloom filter 签名。默认情况下，只有签名有效且作者在信任集合中的结果才会显示（例外：节点自身索引中未经 DHT 传来的未签名文档视为它自己的文档；外部搜索引擎的结果标记为“external”）。为 DHT 存储文档的节点无法伪造它，只能扣留它。</li>
+  <li><strong>开放模式。</strong>可以显示未签名或不受信任的结果，它们标记为“unverified”，并且始终排在已验证结果之下。签名被伪造的结果永远不会显示。</li>
+</ul>
+
+<h3>NAT 穿透</h3>
+<p>一个 sidecar 进程（Go，go-libp2p）与 YaCy 并行运行，使用同一个密钥。在 NAT 后面时，它在 circuit relay v2 上预留一个槽位，并在签名的 seed 中公布 circuit 地址（<code>Reach=relay</code>）。其他节点为它打开一个本地隧道端口并使用普通 HTTP，因此 YaCy 现有的客户端无需改动即可工作。默认情况下，这样的节点只响应搜索；除非主动选择加入，否则它们不存储 DHT 数据。</p>
+<p>详情见<a href="../design.html">信任与 NAT 设计 (English)</a>。</p>
+
+<h2 id="results">结果</h2>
+<p><a href="https://github.com/pad01g/yacy-lab">yacy-lab</a> 中的两个实验。两者都在 docker compose 中运行封闭网络，使用确定性的语料和查询集。</p>
+
+<h3>搜索质量：上游 vs 分支，各 3 个节点</h3>
+<p>每个节点抓取一个站点。查询以 <code>resource=global</code> 发送到节点 1，而大多数相关页面位于其他节点上。语料包含两类诱饵：堆砌某一个查询词的页面，以及标题中包含整个查询的单薄“标签归档”页面。结果为 11 个查询（6 个英文、4 个日文、1 个中文）的平均值，共运行 2 次，除注明处外两次结果相同。</p>
+<div class="tablewrap"><table>
+<thead><tr><th>集群 / 路径</th><th class="num">R-precision ↑</th><th class="num">Recall@10 ↑</th><th class="num">前 R 名中的诱饵 ↓</th><th class="num">前 10 名包含全部词 ↑</th></tr></thead>
+<tbody>
+<tr><td>上游，默认</td><td class="num">0.52</td><td class="num">0.96</td><td class="num">0.48</td><td class="num">0.42</td></tr>
+<tr class="fork"><td>分支，默认</td><td class="num">0.79–0.86</td><td class="num">1.00</td><td class="num">0.14–0.21</td><td class="num">0.75</td></tr>
+<tr><td>上游，仅词索引</td><td class="num">0.02</td><td class="num">0.02</td><td class="num">0.00</td><td class="num">0.09</td></tr>
+<tr class="fork"><td>分支，仅词索引</td><td class="num">0.93</td><td class="num">0.95</td><td class="num">0.07</td><td class="num">0.77</td></tr>
+</tbody></table></div>
+<ul>
+  <li>前 5 名中的关键词堆砌页面（11 个查询合计）：上游 <span class="bad">14</span>，分支 <span class="good">0</span>。</li>
+  <li>单薄的标签归档页面排名下降，但仍留在前 5 名内。它们的平均名次在默认搜索中为 4.5，仅用词索引时为 5.0。仅用 Solr 时，从不加单薄页面权重的 2.0 变为加权后的 3.1。它们仍然排在标题中不含查询词的相关页面之上。更强的加权会让它们排得更低，但也会压低正当的短页面，因此默认值保持温和。</li>
+  <li>在由新节点组成的网络中，上游无法使用其他节点的词索引，而且在那里根本找不到日文或中文的词。</li>
+  <li>最小匹配的默认值是在这个语料上选定的。它是否适合公共网络，仍需在公共网络上测量。</li>
+</ul>
+
+<h3>信任与 NAT：6 个分支节点、一个中继和一个 NAT</h3>
+<p>三个受信任节点，一个声明了 <code>ads</code> 的受信任节点，一个已签名但不受信任的节点（它抓取垃圾内容，并植入借用他人签名的文档），以及一个位于 MASQUERADE 路由器后面的节点。<strong>全部 26 项检查通过</strong>，其中包括：</p>
+<ul>
+  <li>节点 ID 由密钥派生。不受信任节点的垃圾内容默认不显示，即使某个受信任节点持有其副本也是如此。</li>
+  <li>在开放模式下，垃圾内容会出现，标记为 unverified，并排在每一个已验证结果之下。借用签名的文档永远不会出现。</li>
+  <li><code>ads</code> 节点的结果带有该标签，<code>excludeTags=ads</code> 可将其移除。</li>
+  <li>NAT 后面的节点无法被直接访问，但它的页面可以通过中继被找到，并且它保持连接。</li>
+  <li>新的列表版本仅靠节点间交换就能传播开。撤销一个运营者会移除其节点的结果。</li>
+</ul>
+
+<h2 id="try">试一试</h2>
+<p>演示在一台机器上启动两个网络（3 个上游节点，以及分支的信任与 NAT 配置），并在它们前面放一个搜索页面。你需要 Docker，并预留大约 7&nbsp;GB 内存。</p>
+<pre><code>git clone https://github.com/pad01g/yacy_search_server.git yacy
+git clone https://github.com/pad01g/yacy-lab.git
+cd yacy
+git checkout baseline        &amp;&amp; docker build -t yacy-lab/upstream:baseline -f docker/Dockerfile .
+git checkout improved-search &amp;&amp; docker build -t yacy-lab/fork:latest -f docker/Dockerfile .
+docker build -t yacy-lab/sidecar:latest sidecar/
+cd ../yacy-lab
+docker compose -f compose.demo.yaml -p yacydemo up -d
+# 打开 http://localhost:8800（初始化约需 10 分钟，并会显示进度）</code></pre>
+<figure>
+  <img src="../assets/demo.png" alt="演示页面：同一查询分别发送到上游网络（左）和分支（右）。上游先列出垃圾页面；分支先列出已验证的相关页面，并在开放模式下把垃圾页面列在其下方，标记为 unverified。" loading="lazy">
+  <figcaption>开放模式下的 “bitcoin lightning channel”。左：上游先显示垃圾内容。右：分支先显示已验证的结果，垃圾内容标记为 unverified，排在下方。</figcaption>
+</figure>
+<p>该页面还允许你更改信任：选择发起搜索的节点信任哪些协调者（第二个协调者只列出了垃圾节点，因此信任它会让垃圾内容变成“verified”），编辑并重新签名信任列表，把新版本交给一个节点并观察它传播开，以及撤销或恢复运营者的委托。</p>
+<p>实验本身：<code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code>（搜索质量）和 <code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code>（信任与 NAT）。见 <a href="https://github.com/pad01g/yacy-lab#readme">lab README</a>。</p>
+
+<h2 id="join">加入：无需许可</h2>
+<p>任何人，无论是人还是代理（agent），都可以运行一个节点，用某一个成员的 URL 连接（<code>p2p.bootstrap.peers</code>，也可以跨 Tailscale 网络），为自己的页面和服务建立索引并签名，还可以运行自己的协调者或运营者：协调者只是一个密钥加上放在任意 URL 上的一个签名文件，不需要服务器。允许声明过的广告（<code>ads</code> 标签）；信任谁的列表由用户选择。<a href="join.html">如何加入</a> · 欢迎 pull request。</p>
+
+<h2 id="agents">面向 AI 代理</h2>
+<p>代理可以运行自己的节点，并把它当作搜索工具使用，无需搜索 API 或 API 密钥：</p>
+<ul>
+  <li><strong>MCP 服务器</strong>（<code>io.github.pad01g/yacy-search</code>）：<code>docker run -i --rm --network yacy -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD=&lt;你的密码&gt; ghcr.io/pad01g/yacy-search-mcp:0.2.0</code>（节点以 <code>docker run -d --name yacy --network yacy -p 127.0.0.1:8090:8090 -v yacy_data:/opt/yacy_search_server/DATA ghcr.io/pad01g/yacy-improved-search:latest</code> 启动；请先修改默认密码 <code>yacy</code>）。工具：<code>search</code>、<code>crawl</code>、<code>index_status</code>、<code>peers</code>、<code>get_ranking_settings</code>、<code>set_ranking_setting</code>、<code>evaluate_ranking</code>、<code>trust_status</code>。它与代理并行运行，并与代理自己的节点通信；没有中心服务。</li>
+  <li><strong>代理 skill</strong>：<code>npx skills add pad01g/yacy-lab</code> 会安装 <a href="https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md">yacy-p2p-search</a>（启动节点、抓取、搜索、评估并调整排序）。</li>
+  <li><strong>信任登记库</strong>：<a href="https://github.com/pad01g/yacy-trust">pad01g/yacy-trust</a>。一个被合并的 pull request 会把你的节点列入列表，或让你成为为节点担保的运营者。</li>
+  <li>机器可读的摘要：<a href="../llms.txt">llms.txt</a>。</li>
+</ul>
+
+<h2 id="limits">局限</h2>
+<ul>
+  <li>默认与公共 YaCy 网络不兼容（拒绝未签名的 seed，CJK 词哈希已改变）。开放模式可以搜索旧节点，但结果只作为 unverified 显示。</li>
+  <li>未配置协调者时，节点只信任自己的文档。封闭网络可以使用 <code>trust.signedOnly=true</code>。公共网络需要有人担任协调者。</li>
+  <li>语料是合成的，而且规模小（160 个页面）。它复现了在公共网络上发现的弱点，但不能预测在公共网络上改进的幅度。</li>
+  <li>NAT 测试使用的是一台 MASQUERADE 路由器，而不是真实的家用路由器。打洞（DCUtR）已启用但未测量。</li>
+  <li>受信任的作者仍然可以对虚假内容签名（应对办法是标签和审计）。存储文档的节点仍然可以扣留结果。</li>
+</ul>
+
+<h2 id="links">链接</h2>
+<ul>
+  <li>代码：<a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">pad01g/yacy_search_server</a>，分支 <code>improved-search</code>（改动列在 <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/FORK.md">FORK.md</a> 中）</li>
+  <li>实验与演示：<a href="https://github.com/pad01g/yacy-lab">pad01g/yacy-lab</a></li>
+  <li>完整设计文档（日文）：<a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/docs/trust-and-nat.md">docs/trust-and-nat.md</a></li>
+  <li>上游：<a href="https://github.com/yacy/yacy_search_server">yacy/yacy_search_server</a> · <a href="https://community.searchlab.eu/">YaCy 论坛</a></li>
+</ul>
+</main>
+<footer>YaCy 是基于 GPL 的自由软件。本分支沿用其许可证。与 YaCy 项目没有关联。</footer>
+</body>
+</html>

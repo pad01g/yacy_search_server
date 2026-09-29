@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YaCy improved-search</title>
+<meta name="description" content="Um fork experimental do YaCy: ranking mais rigoroso e mais justo, busca em CJK, peers e documentos assinados, listas de confiança de coordenadores e travessia de NAT por um relay libp2p, medido em redes docker compose reproduzíveis.">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="alternate" hreflang="ja" href="../ja/">
+<link rel="alternate" hreflang="zh-Hans" href="../zh/">
+<link rel="alternate" hreflang="es" href="../es/">
+<link rel="alternate" hreflang="pt" href="../pt/">
+<link rel="alternate" hreflang="ko" href="../ko/">
+<link rel="alternate" hreflang="de" href="../de/">
+<link rel="alternate" hreflang="fr" href="../fr/">
+<link rel="describedby" type="text/markdown" href="../llms.txt">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="topbar"><div class="inner">
+  <a class="brand" href="./">YaCy improved-search</a>
+  <nav>
+    <a href="./" aria-current="page">Visão geral</a>
+    <a href="join.html">Participar</a>
+    <a href="../design.html">Design de confiança e NAT (em inglês)</a>
+    <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">Código</a>
+    <a href="https://github.com/pad01g/yacy-lab">Laboratório</a>
+  </nav>
+  <nav class="langs" aria-label="Idioma">
+    <a href="../" hreflang="en" lang="en">English</a>
+    <a href="../ja/" hreflang="ja" lang="ja">日本語</a>
+    <a href="../zh/" hreflang="zh-Hans" lang="zh-Hans">简体中文</a>
+    <a href="../es/" hreflang="es" lang="es">Español</a>
+    <a href="../pt/" hreflang="pt" lang="pt" aria-current="true">Português</a>
+    <a href="../ko/" hreflang="ko" lang="ko">한국어</a>
+    <a href="../de/" hreflang="de" lang="de">Deutsch</a>
+    <a href="../fr/" hreflang="fr" lang="fr">Français</a>
+  </nav>
+</div></div>
+
+<main>
+<header class="hero">
+  <h1>Um fork experimental do YaCy: ranking melhor, resultados assinados, peers atrás de NAT</h1>
+  <p class="lead">Um fork do <a href="https://github.com/yacy/yacy_search_server">YaCy</a> que corrige fraquezas medidas na rede pública, adiciona uma camada de confiança para que resultados forjados e spam possam ser filtrados, e permite que peers atrás de um NAT participem por meio de um relay. Cada afirmação desta página foi medida em redes peer-to-peer fechadas que qualquer pessoa pode reconstruir com docker compose.</p>
+  <div class="buttons">
+    <a class="button" href="#try">Experimentar a demo</a>
+    <a class="button" href="join.html">Participar da rede</a>
+    <a class="button secondary" href="#results">Ver os resultados</a>
+    <a class="button secondary" href="../design.html">Ler o design (em inglês)</a>
+  </div>
+</header>
+
+<div class="note">
+  <p><strong>Status: experimento.</strong> Isto não é uma versão lançada pelo projeto YaCy e não tem afiliação com ele. Quebra deliberadamente a compatibilidade com a rede pública do YaCy (ids de peer, seeds, hashes de palavras CJK). É compartilhado para mostrar, com dados, o que as mudanças fazem, para que as ideias possam ser discutidas e, onde fizerem sentido, propostas upstream em partes pequenas.</p>
+</div>
+
+<h2 id="why">Por quê</h2>
+<p>Medido na rede pública do YaCy (freeworld) com 16 consultas, apenas <strong>11%</strong> dos 10 primeiros resultados continham todos os termos da consulta. Investigando as causas:</p>
+<ul>
+  <li>Consultas com vários termos eram enviadas ao Solr com correspondência mínima 1 (uma consulta OR), tanto ao índice próprio quanto a cada peer remoto.</li>
+  <li>As pontuações do Solr de cada peer são normalizadas pelo seu melhor resultado, então um peer que só tem correspondências de um termo coloca a melhor delas no mesmo nível das correspondências exatas de outros peers.</li>
+  <li>Texto em japonês e chinês só é dividido em espaços e pontuação, então uma frase inteira vira uma única "palavra" e o índice de palavras (RWI) não consegue encontrá-la.</li>
+  <li>Em uma rede de peers novos, peers com menos de 3 dias nunca são consultados em uma busca no índice de palavras, e definições de rede pequenas não enviam consultas Solr remotas a ninguém.</li>
+  <li>Os resultados não trazem nenhuma prova de origem. Um peer pode devolver qualquer URL com qualquer título para qualquer consulta, e seeds podem ser reenviados ou alterados por terceiros.</li>
+  <li>Peers atrás de um NAT só podem ser "junior": não são alcançáveis, então o que eles indexam é invisível para os outros.</li>
+</ul>
+
+<h2 id="changes">O que mudou</h2>
+<div class="cards">
+  <div class="card"><h3>Ranking</h3><p>Correspondência mínima mais rigorosa, ponderação por cobertura de termos após a normalização por peer, um peso contra páginas rasas e busca em todos os peers de redes pequenas.</p></div>
+  <div class="card"><h3>CJK</h3><p>Texto em chinês, japonês e coreano é indexado e buscado como bigramas sobrepostos, no Solr e no índice de palavras.</p></div>
+  <div class="card"><h3>Confiança</h3><p>Chaves de peer Ed25519, seeds assinados, listas de confiança assinadas por coordenadores com tags declaradas, e uma assinatura de autor em cada documento que o peer rastreia.</p></div>
+  <div class="card"><h3>Travessia de NAT</h3><p>Um pequeno sidecar go-libp2p reserva um slot em um circuit relay, para que peers atrás de um NAT respondam buscas.</p></div>
+</div>
+
+<h3>Qualidade da busca</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Sintoma</th><th>Causa</th><th>Mudança</th></tr></thead>
+<tbody>
+<tr><td>Páginas que correspondem a um só termo (keyword stuffing) ficam no topo</td><td>Solr <code>mm=1</code> para consultas com vários termos</td><td>Correspondência mínima <code>2&lt;-1 5&lt;80%</code>: com dois termos, ambos precisam corresponder; com 3–5 termos, pode faltar um (<code>search.ranking.solr.mm</code>, <code>.mm.cjk</code>)</td></tr>
+<tr><td>A melhor correspondência parcial de um peer é classificada como as correspondências exatas de outros peers</td><td>Normalização da pontuação por peer</td><td>Multiplicar a pontuação normalizada por (termos encontrados / termos da consulta)², no mínimo 0.05, e nunca abaixo do que a correspondência mínima garante (<code>search.ranking.coverage.exponent</code>)</td></tr>
+<tr><td>Japonês / chinês não são encontrados no índice de palavras</td><td>Não há segmentação de palavras para CJK</td><td>Bigramas sobrepostos no índice de palavras e na consulta; <code>CJKWidthFilter</code> + <code>CJKBigramFilter</code> no schema do Solr</td></tr>
+<tr><td>Páginas rasas com a consulta inteira no título (listas de tags) ficam no topo</td><td>O <code>qf</code> padrão pondera title^5 e h1^5 (e host ^6, nome de arquivo da URL ^4, caminho ^3) contra text^1</td><td>Resultados com menos de 100 palavras são ponderados por palavras / 100, no mínimo 0.1 (<code>search.ranking.thin.words</code>); contagem de palavras CJK corrigida (contava espaços)</td></tr>
+<tr><td>Uma rede de peers novos nunca busca nos índices de palavras de outros peers</td><td>A busca DHT precisa de peers com mais de 3 dias</td><td>Configurável (<code>remotesearch.dht.minage</code>, padrão 3)</td></tr>
+<tr><td>Redes pequenas não enviam consultas Solr remotas a ninguém, ou ignoram os alvos DHT</td><td>A fórmula do número de alvos dá 0; os alvos DHT eram excluídos do Solr</td><td>Redes de até 32 peers consultam cada peer confiável conectado (cada peer no modo aberto), alvos DHT incluídos</td></tr>
+</tbody></table></div>
+
+<h3>Camada de confiança</h3>
+<ul>
+  <li><strong>Identidade do peer.</strong> Cada peer tem uma chave Ed25519. Seu hash de peer de 12 caracteres é derivado da chave pública, e o núcleo do seu seed (nome, portas, chave, alcançabilidade, tags declaradas) é assinado. Seeds sem assinatura são rejeitados por padrão. Um desafio hello prova que o dono da chave responde em um endereço.</li>
+  <li><strong>Listas de confiança.</strong> Os usuários configuram chaves de coordenador. Um coordenador delega a operadores, e os operadores assinam listas de peers confiáveis com uma prioridade e tags declaradas como <code>ads</code> ou <code>proxy:&lt;engine&gt;</code>. As listas são versionadas em vez de expirarem e se propagam de peer para peer.</li>
+  <li><strong>Assinaturas de autor.</strong> O peer que rastreia uma página assina sua URL, seu título e um filtro de Bloom das suas palavras. Por padrão, um resultado só é exibido se sua assinatura for válida e seu autor estiver no conjunto de confiança (exceções: documentos sem assinatura no índice próprio do peer que não vieram pela DHT contam como seus, e resultados de mecanismos de busca externos são marcados como "externos"). Um peer que armazena um documento para a DHT não pode forjá-lo. Só pode retê-lo.</li>
+  <li><strong>Modo aberto.</strong> Resultados sem assinatura ou não confiáveis podem ser exibidos, marcados como "não verificados" e sempre classificados abaixo dos verificados. Resultados com assinatura forjada nunca são exibidos.</li>
+</ul>
+
+<h3>Travessia de NAT</h3>
+<p>Um processo sidecar (Go, go-libp2p) roda ao lado do YaCy com a mesma chave. Atrás de um NAT, ele reserva um slot em um circuit relay v2 e anuncia o endereço do circuito no seed assinado (<code>Reach=relay</code>). Os outros peers abrem uma porta de túnel local até ele e usam HTTP comum, então os clientes existentes do YaCy funcionam sem alterações. Por padrão, esses peers só respondem buscas. Eles não armazenam dados da DHT, a menos que optem por isso.</p>
+<p>Os detalhes estão no <a href="../design.html">design de confiança e NAT (em inglês)</a>.</p>
+
+<h2 id="results">Resultados</h2>
+<p>Dois experimentos no <a href="https://github.com/pad01g/yacy-lab">yacy-lab</a>. Ambos rodam redes fechadas em docker compose, com um corpus e um conjunto de consultas determinísticos.</p>
+
+<h3>Qualidade da busca: upstream vs fork, 3 peers cada</h3>
+<p>Cada peer rastreia um site. As consultas vão para o peer 1 com <code>resource=global</code>, e a maioria das páginas relevantes está nos outros peers. O corpus contém dois tipos de iscas: páginas recheadas com um termo da consulta e páginas rasas de "arquivo de tags" com a consulta inteira no título. Média de 11 consultas (6 em inglês, 4 em japonês, 1 em chinês), 2 execuções com o mesmo resultado, exceto onde indicado.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Cluster / caminho</th><th class="num">R-precision ↑</th><th class="num">Recall@10 ↑</th><th class="num">Iscas no top R ↓</th><th class="num">Todos os termos no top 10 ↑</th></tr></thead>
+<tbody>
+<tr><td>upstream, padrão</td><td class="num">0.52</td><td class="num">0.96</td><td class="num">0.48</td><td class="num">0.42</td></tr>
+<tr class="fork"><td>fork, padrão</td><td class="num">0.79–0.86</td><td class="num">1.00</td><td class="num">0.14–0.21</td><td class="num">0.75</td></tr>
+<tr><td>upstream, só índice de palavras</td><td class="num">0.02</td><td class="num">0.02</td><td class="num">0.00</td><td class="num">0.09</td></tr>
+<tr class="fork"><td>fork, só índice de palavras</td><td class="num">0.93</td><td class="num">0.95</td><td class="num">0.07</td><td class="num">0.77</td></tr>
+</tbody></table></div>
+<ul>
+  <li>Páginas com keyword stuffing no top 5 (soma das 11 consultas): upstream <span class="bad">14</span>, fork <span class="good">0</span>.</li>
+  <li>As páginas rasas de arquivo de tags descem, mas continuam no top 5. Sua posição média é 4.5 na busca padrão e 5.0 só com o índice de palavras. Só com o Solr, vai de 2.0 sem a ponderação de páginas rasas para 3.1 com ela. Elas ainda ficam acima de páginas relevantes que não têm os termos da consulta no título. Uma ponderação mais forte as empurraria mais para baixo, mas também rebaixaria páginas curtas legítimas, então o padrão foi mantido suave.</li>
+  <li>O upstream não consegue usar os índices de palavras de outros peers em uma rede de peers novos, e ali não consegue encontrar palavras em japonês ou chinês de forma alguma.</li>
+  <li>O padrão da correspondência mínima foi escolhido com este corpus. Se ele é adequado para a rede pública ainda precisa ser medido lá.</li>
+</ul>
+
+<h3>Confiança e NAT: 6 peers do fork, um relay e um NAT</h3>
+<p>Três peers confiáveis, um peer confiável que declara <code>ads</code>, um peer assinado mas não confiável que rastreia spam e planta documentos com uma assinatura emprestada, e um peer atrás de um roteador MASQUERADE. <strong>Todas as 26 verificações passam</strong>, entre elas:</p>
+<ul>
+  <li>Os ids de peer são derivados das chaves. O spam do peer não confiável não é exibido por padrão, nem mesmo quando um peer confiável guarda uma cópia.</li>
+  <li>No modo aberto, o spam aparece marcado como não verificado e abaixo de todos os resultados verificados. O documento com assinatura emprestada nunca aparece.</li>
+  <li>Os resultados do peer <code>ads</code> trazem a tag, e <code>excludeTags=ads</code> os remove.</li>
+  <li>O peer atrás do NAT não pode ser alcançado diretamente, mas suas páginas são encontradas pelo relay, e ele continua conectado.</li>
+  <li>Uma nova versão da lista se propaga apenas pela troca entre peers. Revogar um operador remove os resultados dos seus peers.</li>
+</ul>
+
+<h2 id="try">Experimente</h2>
+<p>A demo sobe as duas redes (3 peers upstream, e a configuração de confiança e NAT do fork) em uma única máquina e coloca uma página de busca na frente delas. Você precisa de Docker com cerca de 7&nbsp;GB de memória.</p>
+<pre><code>git clone https://github.com/pad01g/yacy_search_server.git yacy
+git clone https://github.com/pad01g/yacy-lab.git
+cd yacy
+git checkout baseline        &amp;&amp; docker build -t yacy-lab/upstream:baseline -f docker/Dockerfile .
+git checkout improved-search &amp;&amp; docker build -t yacy-lab/fork:latest -f docker/Dockerfile .
+docker build -t yacy-lab/sidecar:latest sidecar/
+cd ../yacy-lab
+docker compose -f compose.demo.yaml -p yacydemo up -d
+# abra http://localhost:8800 (a preparação leva cerca de 10 minutos e mostra o progresso)</code></pre>
+<figure>
+  <img src="../assets/demo.png" alt="A página da demo: a mesma consulta enviada à rede upstream (esquerda) e ao fork (direita). O upstream lista primeiro páginas de spam; o fork lista primeiro páginas relevantes verificadas e, no modo aberto, o spam abaixo delas, marcado como não verificado." loading="lazy">
+  <figcaption>"bitcoin lightning channel" no modo aberto. Esquerda: o upstream mostra o spam primeiro. Direita: o fork mostra primeiro os resultados verificados e, abaixo, o spam marcado como não verificado.</figcaption>
+</figure>
+<p>A página também permite mudar a confiança: escolher em quais coordenadores o peer que busca confia (um segundo coordenador lista apenas o peer de spam, então confiar nele torna o spam "verificado"), editar e assinar de novo a lista de confiança, entregar a nova versão a um peer e ver como ela se propaga, e revogar ou restaurar a delegação do operador.</p>
+<p>Os experimentos em si: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code> (qualidade da busca) e <code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code> (confiança e NAT). Veja o <a href="https://github.com/pad01g/yacy-lab#readme">README do laboratório</a>.</p>
+
+<h2 id="join">Participar: sem pedir permissão</h2>
+<p>Qualquer um, pessoa ou agente, pode rodar um peer, conectá-lo com a URL de um membro (<code>p2p.bootstrap.peers</code>, também por uma rede Tailscale), indexar e assinar suas próprias páginas e serviços, e ter seu próprio coordenador ou operador: um coordenador é só uma chave e um arquivo assinado em qualquer URL, sem servidor. Anúncios declarados (tag <code>ads</code>) são permitidos; os usuários escolhem em quais listas confiam. <a href="join.html">Como participar</a> · pull requests são bem-vindos.</p>
+
+<h2 id="agents">Para agentes de IA</h2>
+<p>Um agente pode rodar seu próprio peer e usá-lo como ferramenta de busca, sem API de busca nem chave de API:</p>
+<ul>
+  <li><strong>Servidor MCP</strong> (<code>io.github.pad01g/yacy-search</code>): <code>docker run -i --rm --network yacy -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD=&lt;sua senha&gt; ghcr.io/pad01g/yacy-search-mcp:0.2.0</code> (com o peer iniciado como <code>docker run -d --name yacy --network yacy -p 127.0.0.1:8090:8090 -v yacy_data:/opt/yacy_search_server/DATA ghcr.io/pad01g/yacy-improved-search:latest</code>; troque antes a senha padrão <code>yacy</code>). Ferramentas: <code>search</code>, <code>crawl</code>, <code>index_status</code>, <code>peers</code>, <code>get_ranking_settings</code>, <code>set_ranking_setting</code>, <code>evaluate_ranking</code>, <code>trust_status</code>. Ele roda ao lado do agente e fala com o peer próprio do agente; não há nenhum serviço central.</li>
+  <li><strong>Skill de agente</strong>: <code>npx skills add pad01g/yacy-lab</code> instala <a href="https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md">yacy-p2p-search</a> (iniciar um peer, rastrear, buscar, avaliar e ajustar o ranking).</li>
+  <li><strong>Registro de confiança</strong>: <a href="https://github.com/pad01g/yacy-trust">pad01g/yacy-trust</a>. Um pull request aceito inclui seu peer na lista ou torna você um operador que avaliza peers.</li>
+  <li>Resumo legível por máquina: <a href="../llms.txt">llms.txt</a>.</li>
+</ul>
+
+<h2 id="limits">Limitações</h2>
+<ul>
+  <li>Incompatível por padrão com a rede pública do YaCy (seeds sem assinatura rejeitados, hashes de palavras CJK alterados). O modo aberto pode buscar em peers antigos, mas apenas como resultados não verificados.</li>
+  <li>Sem coordenadores configurados, um peer só confia nos seus próprios documentos. Redes fechadas podem usar <code>trust.signedOnly=true</code>. Uma rede pública precisa de alguém que atue como coordenador.</li>
+  <li>O corpus é sintético e pequeno (160 páginas). Ele reproduz as fraquezas encontradas na rede pública. Não prevê o tamanho da melhoria lá.</li>
+  <li>O teste de NAT usa um roteador MASQUERADE, não roteadores domésticos reais. O hole punching (DCUtR) está ativado, mas não foi medido.</li>
+  <li>Um autor confiável ainda pode assinar conteúdo falso (a resposta são as tags e a auditoria). Um peer que armazena ainda pode reter resultados.</li>
+</ul>
+
+<h2 id="links">Links</h2>
+<ul>
+  <li>Código: <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">pad01g/yacy_search_server</a>, branch <code>improved-search</code> (mudanças listadas em <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/FORK.md">FORK.md</a>)</li>
+  <li>Experimentos e demo: <a href="https://github.com/pad01g/yacy-lab">pad01g/yacy-lab</a></li>
+  <li>Documento de design completo (em japonês): <a href="https://github.com/pad01g/yacy_search_server/blob/improved-search/docs/trust-and-nat.md">docs/trust-and-nat.md</a></li>
+  <li>Upstream: <a href="https://github.com/yacy/yacy_search_server">yacy/yacy_search_server</a> · <a href="https://community.searchlab.eu/">fórum do YaCy</a></li>
+</ul>
+</main>
+<footer>O YaCy é software livre sob a GPL. Este fork mantém suas licenças. Sem afiliação com o projeto YaCy.</footer>
+</body>
+</html>

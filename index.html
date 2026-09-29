@@ -5,7 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>YaCy improved-search</title>
 <meta name="description" content="An experimental YaCy fork: stricter and fairer ranking, CJK search, signed peers and documents, coordinator trust lists and NAT traversal through a libp2p relay, measured in reproducible docker compose networks.">
+<link rel="alternate" hreflang="en" href="./">
 <link rel="alternate" hreflang="ja" href="ja/">
+<link rel="alternate" hreflang="zh-Hans" href="zh/">
+<link rel="alternate" hreflang="es" href="es/">
+<link rel="alternate" hreflang="pt" href="pt/">
+<link rel="alternate" hreflang="ko" href="ko/">
+<link rel="alternate" hreflang="de" href="de/">
+<link rel="alternate" hreflang="fr" href="fr/">
 <link rel="describedby" type="text/markdown" href="llms.txt">
 <link rel="stylesheet" href="assets/style.css">
 </head>
@@ -14,11 +21,21 @@
   <a class="brand" href="./">YaCy improved-search</a>
   <nav>
     <a href="./" aria-current="page">Overview</a>
+    <a href="join.html">Join</a>
     <a href="design.html">Trust &amp; NAT design</a>
     <a href="https://github.com/pad01g/yacy_search_server/tree/improved-search">Code</a>
     <a href="https://github.com/pad01g/yacy-lab">Lab</a>
   </nav>
-  <a class="lang" href="ja/" hreflang="ja" lang="ja">日本語</a>
+  <nav class="langs" aria-label="Language">
+    <a href="./" hreflang="en" lang="en" aria-current="true">English</a>
+    <a href="ja/" hreflang="ja" lang="ja">日本語</a>
+    <a href="zh/" hreflang="zh-Hans" lang="zh-Hans">简体中文</a>
+    <a href="es/" hreflang="es" lang="es">Español</a>
+    <a href="pt/" hreflang="pt" lang="pt">Português</a>
+    <a href="ko/" hreflang="ko" lang="ko">한국어</a>
+    <a href="de/" hreflang="de" lang="de">Deutsch</a>
+    <a href="fr/" hreflang="fr" lang="fr">Français</a>
+  </nav>
 </div></div>
 
 <main>
@@ -27,6 +44,7 @@
   <p class="lead">A fork of <a href="https://github.com/yacy/yacy_search_server">YaCy</a> that fixes weaknesses measured on the public network, adds a trust layer so that forged and spam results can be filtered, and lets peers behind a NAT take part through a relay. Every claim on this page is measured in closed peer-to-peer networks that anyone can rebuild with docker compose.</p>
   <div class="buttons">
     <a class="button" href="#try">Try the demo</a>
+    <a class="button" href="join.html">Join the network</a>
     <a class="button secondary" href="#results">See the results</a>
     <a class="button secondary" href="design.html">Read the design</a>
   </div>
@@ -126,6 +144,9 @@ docker compose -f compose.demo.yaml -p yacydemo up -d
 </figure>
 <p>The page also lets you change trust: choose which coordinators the searching peer trusts (a second coordinator lists only the spam peer, so trusting it makes the spam "verified"), edit and re-sign the trust list, hand the new version to one peer and watch it spread, and revoke or restore the operator's delegation.</p>
 <p>The experiments themselves: <code>docker compose -p yacylab up -d &amp;&amp; docker compose -p yacylab run --rm runner</code> (search quality) and <code>docker compose -f compose.trust.yaml -p yacytrust up -d &amp;&amp; docker compose -f compose.trust.yaml -p yacytrust run --rm runner</code> (trust and NAT). See the <a href="https://github.com/pad01g/yacy-lab#readme">lab README</a>.</p>
+
+<h2 id="join">Join: no permission needed</h2>
+<p>Anyone, person or agent, can run a peer, connect it with the URL of one member (<code>p2p.bootstrap.peers</code>, also across a Tailscale network), index and sign their own pages and services, and run their own coordinator or operator: a coordinator is only a key and a signed file on any URL, no server. Declared ads (<code>ads</code> tag) are allowed; users choose whose lists they trust. <a href="join.html">How to join</a> · pull requests welcome.</p>
 
 <h2 id="agents">For AI agents</h2>
 <p>An agent can run its own peer and use it as a search tool, without a search API or API key:</p>

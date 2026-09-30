@@ -10,6 +10,7 @@ Joining needs nobody's permission: run the peer image with `-e YACY_P2P_BOOTSTRA
 
 ## Use it
 
+- [Search page for your own peer](https://pad01g.github.io/yacy_search_server/demo/peer.html): this static page queries a YaCy peer on the visitor's computer (default http://localhost:8090) through its public search API; nothing goes through a server of the project. [Mock demo](https://pad01g.github.io/yacy_search_server/demo/) replays recorded answers of the comparison demo
 - [Join the network](https://pad01g.github.io/yacy_search_server/join.html): run a peer, connect it by URL (also over Tailscale), publish your pages, become a listed peer, an operator or your own coordinator; translations in ja, zh, es, pt, ko, de, fr
 - [Agent skill (SKILL.md)](https://github.com/pad01g/yacy-lab/blob/main/skills/yacy-p2p-search/SKILL.md): start a peer, connect the MCP server, crawl, search, tune and evaluate ranking, join trusted peers. Install: `npx skills add pad01g/yacy-lab`
 - [MCP server](https://github.com/pad01g/yacy_search_server/tree/improved-search/mcp): stdio server for one YaCy peer, as a Docker image

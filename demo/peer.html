@@ -112,6 +112,7 @@ const T = {
     connecting: "Connecting…", connected: "Connected.",
     failed: "Cannot reach the peer at {url}: {err}. See “If it does not connect” below.",
     notFork: "Connected, but this peer does not look like the improved-search fork (no signed seed): search works, but results carry no author verdicts.",
+    newPeer: "new (it has no public address yet, so it has not joined a network)",
     fName: "Peer", fType: "Type", fDocs: "Documents in its index", fPeers: "Peers it knows", fSigned: "Signed seed",
     yes: "yes", no: "no",
     emptyIndex: "The index of this peer is empty and it knows no other peers, so searches return nothing yet. Crawl a site first: <a id='crawlLink' target='_blank' rel='noopener'>open the crawler of your peer</a> (log in as admin), or use the MCP tool <code>crawl</code>.",
@@ -140,6 +141,7 @@ const T = {
     connecting: "接続中…", connected: "接続しました。",
     failed: "{url} のピアに届きません: {err}。下の「つながらないとき」を見てください。",
     notFork: "接続しましたが、このピアは改善版ではないようです（署名付きの seed が無い）。検索はできますが、作者の判定は付きません。",
+    newPeer: "新しいピア（まだ公開アドレスが無く、網に参加していない）",
     fName: "ピア", fType: "種別", fDocs: "索引の文書数", fPeers: "知っているピア", fSigned: "署名付きの seed",
     yes: "あり", no: "なし",
     emptyIndex: "このピアの索引は空で、他のピアも知らないので、まだ何も見つかりません。まず crawl する: <a id='crawlLink' target='_blank' rel='noopener'>ピアの crawl の画面を開く</a>（admin でログイン）か、MCP の <code>crawl</code> を使う。",
@@ -215,24 +217,31 @@ async function connect() {
   status(t.connecting);
   $("facts").hidden = true; $("emptyHint").hidden = true; $("go").disabled = true;
   try {
-    const me = (await getJson(b + "/yacy/seedlist.json?my=")).peers?.[0];
-    if (!me) throw new Error("no seed");
+    let me = (await getJson(b + "/yacy/seedlist.json?my=")).peers?.[0];
+    if (!me) {
+      // a new peer lists its own seed only once it knows its public address (after another peer answered it)
+      const probe = await getJson(b + "/yacysearch.json?query=yacy&resource=local&maximumRecords=1&nav=none");
+      if (!probe.channels) throw new Error("not a YaCy peer");
+      me = { Name: "–", PeerType: T[lang].newPeer, LCount: "", PK: "?" };
+    }
     let others = 0;
     try { others = ((await getJson(b + "/yacy/seedlist.json?me=false")).peers || []).length; } catch { /* older peers */ }
     base = b;
     store.set("peer-url", b);
-    const signed = !!me.PK;
-    status(signed ? t.connected : t.notFork, signed ? "ok" : "err");
-    const docs = Number(me.LCount || 0);
+    const signed = !!me.PK && me.PK !== "?";
+    const unknown = me.PK === "?";
+    status(signed || unknown ? t.connected : t.notFork, signed || unknown ? "ok" : "err");
+    const docs = me.LCount === "" ? "–" : Number(me.LCount || 0);
     $("facts").innerHTML = [
-      [t.fName, me.Name], [t.fType, me.PeerType], [t.fDocs, docs], [t.fPeers, others], [t.fSigned, signed ? t.yes : t.no],
+      [t.fName, me.Name], [t.fType, me.PeerType], [t.fDocs, docs], [t.fPeers, others], [t.fSigned, unknown ? "–" : signed ? t.yes : t.no],
     ].map(([k, v]) => `<b>${esc(k)}</b><span>${esc(v)}</span>`).join("");
     $("facts").hidden = false;
-    if (docs === 0 && others === 0) { $("emptyHint").innerHTML = t.emptyIndex; $("emptyHint").hidden = false; links(); }
+    if ((docs === 0 || docs === "–") && others === 0) { $("emptyHint").innerHTML = t.emptyIndex; $("emptyHint").hidden = false; links(); }
     $("go").disabled = false;
   } catch (e) {
     base = null;
     status(fmt(t.failed, { url: b, err: e.name === "TimeoutError" ? "timeout" : e.message }), "err");
+    document.querySelector("main details").open = true;
   }
 }
 $("connectForm").addEventListener("submit", (e) => { e.preventDefault(); connect(); });

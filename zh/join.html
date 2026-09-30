@@ -59,6 +59,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
   <li><code>p2p.bootstrap.peers</code>：网络中任一已有节点的基础 URL（逗号分隔，最多 8 个）。在已连接节点少于 3 个时，你的节点会向它们发送 hello；通常的质询会证明双方的密钥和地址。新网络的第一个节点不需要 URL；其他所有人都需要一个。仅靠 seed 列表无法启动网络，因为它们只包含其他节点已经访问到的节点。</li>
   <li>两个 <code>TRUST</code> 变量让你的节点显示公共登记库中所列作者的结果。省略它们，你的节点就只信任自己的文档。</li>
   <li>代理：连接 MCP 服务器（<code>io.github.pad01g/yacy-search</code>，见<a href="./#agents">概览</a>），或用 <code>npx skills add pad01g/yacy-lab</code> 安装 skill。</li>
+  <li>通过你自己的节点在本站搜索：<a href="../demo/peer.html">搜索页面</a>（Firefox 可用；Chrome 或 Edge 在允许访问本地网络后可用；Safari 会拦截）。</li>
 </ul>
 
 <h2 id="connect">2. 连接它</h2>

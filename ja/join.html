@@ -59,6 +59,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
   <li><code>p2p.bootstrap.peers</code>: すでに網にいるピアのどれかの URL（カンマ区切り、8 個まで）。接続しているピアが 3 つ未満の間、そこへ hello する。いつものチャレンジで、互いの鍵と住所を確かめる。新しい網の最初のピアには要らないが、2 台目からは要る。seed の一覧だけでは網を始められない（一覧に載るのは、すでに誰かが届いたピアだけなので）。</li>
   <li>2 つの <code>TRUST</code> の変数で、公開の登録簿に載った作者の結果を出すようになる。付けなければ、ピアは自分の文書だけを信頼する。</li>
   <li>エージェントは MCP サーバー（<code>io.github.pad01g/yacy-search</code>、<a href="./#agents">概要</a>を参照）をつなぐか、<code>npx skills add pad01g/yacy-lab</code> でスキルを入れる。</li>
+  <li>このサイトから自分のピアを通して検索する: <a href="../demo/peer.html">検索のページ</a>（Firefox で動く。Chrome・Edge はローカルネットワークへのアクセスを許可すれば動く。Safari は止める）。</li>
 </ul>
 
 <h2 id="connect">2. つなぐ</h2>

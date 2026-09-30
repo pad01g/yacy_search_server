@@ -66,6 +66,11 @@
       a.textContent = " プロジェクトの説明へ戻る";
       a.className = "plain";
       bar.append(a);
+      const own = document.createElement("a");
+      own.href = "peer.html";
+      own.textContent = " / 自分のピアで本物の検索をする";
+      own.className = "plain";
+      bar.append(own);
     }
   }
 

@@ -59,6 +59,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
   <li><code>p2p.bootstrap.peers</code>: la URL base de cualquier peer que ya esté en la red (separadas por comas, hasta 8). Mientras haya menos de 3 peers conectados, tu peer les envía un hello; el desafío habitual demuestra la clave y la dirección de cada lado. El primer peer de una red nueva no necesita URL; todos los demás necesitan una. Las listas de seeds por sí solas no pueden iniciar una red, porque solo contienen peers que otros ya han alcanzado.</li>
   <li>Las dos variables <code>TRUST</code> hacen que tu peer muestre resultados de los autores listados en el registro público. Si las omites, tu peer solo confía en sus propios documentos.</li>
   <li>Agentes: conecta el servidor MCP (<code>io.github.pad01g/yacy-search</code>, consulta el <a href="./#agents">resumen</a>) o instala la skill con <code>npx skills add pad01g/yacy-lab</code>.</li>
+  <li>Busca desde este sitio a través de tu propio peer: <a href="../demo/peer.html">página de búsqueda</a> (funciona en Firefox, y en Chrome o Edge después de permitir el acceso a tu red local; Safari lo bloquea).</li>
 </ul>
 
 <h2 id="connect">2. Conéctalo</h2>

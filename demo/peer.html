@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search with your own peer</title>
+<meta name="description" content="Search the YaCy improved-search network from this page through a YaCy peer running on your own computer. No server of ours is involved.">
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8;
+  --accent: #2f5bd3; --good: #1d7a46; --good-soft: #e3f4ea; --bad: #b3261e; --bad-soft: #fbe5e3;
+  --warn: #8a5a00; --warn-soft: #fbf0d9; --chip: #eef0f4; --code: #f1f2f4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171d; --panel: #1c2028; --text: #e4e7ee; --muted: #9aa3b4; --line: #2e3440;
+    --accent: #7ea2ff; --good: #6fd29b; --good-soft: #1b3326; --bad: #ff8a80; --bad-soft: #3a1f1e;
+    --warn: #f0c060; --warn-soft: #3a3020; --chip: #2a2f3a; --code: #232831;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+header, main { max-width: 980px; margin: 0 auto; padding: 16px; }
+header { padding-bottom: 0; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0; }
+.top { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; margin-top: 6px; }
+.top a { color: var(--accent); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+h2 { font-size: 16px; margin: 0 0 8px; }
+pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 8px 0; }
+code { font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: 1px 4px; border-radius: 4px; }
+form, .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+input[type=text], input[type=search], input[type=url] { flex: 1 1 260px; min-width: 0; font: inherit; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+button { font: inherit; font-weight: 600; padding: 8px 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+button.ghost { background: var(--chip); color: var(--text); }
+button:disabled { opacity: .5; cursor: default; }
+select { font: inherit; padding: 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.status { font-size: 14px; margin-top: 8px; }
+.status.ok { color: var(--good); }
+.status.err { color: var(--bad); }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; font-size: 14px; margin-top: 8px; }
+.facts b { color: var(--muted); font-weight: 600; }
+.note { font-size: 13px; color: var(--muted); }
+.warn { background: var(--warn-soft); color: var(--warn); padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-top: 8px; }
+ol.results { list-style: none; margin: 0; padding: 0; }
+ol.results li { padding: 9px 0; border-top: 1px solid var(--line); }
+.title a { color: var(--accent); text-decoration: none; font-weight: 600; word-break: break-word; }
+.url { color: var(--muted); font-size: 12px; word-break: break-all; }
+.snippet { font-size: 13px; margin-top: 2px; word-break: break-word; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip { font-size: 12px; padding: 1px 7px; border-radius: 5px; background: var(--chip); }
+.chip.verified { background: var(--good-soft); color: var(--good); }
+.chip.unverified { background: var(--bad-soft); color: var(--bad); }
+.chip.tag { background: var(--warn-soft); color: var(--warn); }
+.empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
+details summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1 data-t="h1"></h1>
+  <p class="sub" data-t="sub"></p>
+  <div class="top">
+    <a href="../" data-t="back"></a>
+    <a href="./" data-t="mockDemo"></a>
+    <a href="../join.html" data-t="join"></a>
+    <span><button type="button" class="ghost" id="lang" style="padding:2px 10px;font-size:13px"></button></span>
+  </div>
+</header>
+<main>
+  <section class="panel">
+    <h2 data-t="step1"></h2>
+    <p class="note" data-t="step1Text"></p>
+    <pre id="cmd"></pre>
+    <p class="note" data-t="step1After"></p>
+  </section>
+
+  <section class="panel">
+    <h2 data-t="step2"></h2>
+    <form id="connectForm">
+      <input type="url" id="peerUrl" value="http://localhost:8090" aria-label="peer URL" spellcheck="false">
+      <button type="submit" id="connect" data-t="connect"></button>
+    </form>
+    <div class="status" id="status"></div>
+    <div class="facts" id="facts" hidden></div>
+    <div class="warn" id="emptyHint" hidden></div>
+    <details style="margin-top:10px"><summary data-t="troubleTitle"></summary><ul class="note" id="trouble"></ul></details>
+  </section>
+
+  <section class="panel">
+    <h2 data-t="step3"></h2>
+    <form id="searchForm">
+      <input type="search" id="q" autocomplete="off" aria-label="query">
+      <select id="resource"><option value="global"></option><option value="local"></option></select>
+      <button type="submit" id="go" disabled data-t="search"></button>
+    </form>
+    <p class="note" id="meta"></p>
+    <ol class="results" id="results"></ol>
+    <p class="note" data-t="untrusted"></p>
+  </section>
+</main>
+<script>
+const T = {
+  en: {
+    h1: "Search with your own peer",
+    sub: "This page talks directly to a YaCy peer on your computer. Your queries go from your browser to your peer (and from there to other peers), not to any server of ours.",
+    back: "← Project overview", mockDemo: "Demo without a peer (mock)", join: "How to join the network",
+    step1: "1. Start a peer", step1Text: "With Docker (keep the volume: it holds the peer key). Add the bootstrap line with the URL of any peer already in a network you want to join; without it your peer starts alone.",
+    step1After: "Then change the administrator password (admin / yacy) at <a id='accountsLink' target='_blank' rel='noopener'>ConfigAccounts_p.html</a>. This page only uses the public search API: it never needs the password.",
+    step2: "2. Connect this page to it", connect: "Connect",
+    connecting: "Connecting…", connected: "Connected.",
+    failed: "Cannot reach the peer at {url}: {err}. See “If it does not connect” below.",
+    notFork: "Connected, but this peer does not look like the improved-search fork (no signed seed): search works, but results carry no author verdicts.",
+    fName: "Peer", fType: "Type", fDocs: "Documents in its index", fPeers: "Peers it knows", fSigned: "Signed seed",
+    yes: "yes", no: "no",
+    emptyIndex: "The index of this peer is empty and it knows no other peers, so searches return nothing yet. Crawl a site first: <a id='crawlLink' target='_blank' rel='noopener'>open the crawler of your peer</a> (log in as admin), or use the MCP tool <code>crawl</code>.",
+    troubleTitle: "If it does not connect",
+    trouble: [
+      "Is the peer running and ready? <code>curl -s 'http://localhost:8090/yacy/seedlist.json?my='</code> must print JSON (it takes a minute after start).",
+      "Chrome and Edge may ask whether this site may access devices on your local network: allow it.",
+      "Safari blocks requests from an https page to http://localhost. Use Chrome, Edge or Firefox, or open the peer's own search page at http://localhost:8090/.",
+      "Privacy extensions and corporate proxies can block requests to localhost.",
+      "A peer on another machine needs its address instead of localhost, and must be reachable from your browser. Browsers block plain http addresses other than localhost from an https page.",
+    ],
+    step3: "3. Search", qPlaceholder: "search words", global: "network (global)", local: "this peer only (local)", search: "Search",
+    searching: "Searching… (other peers answer within a few seconds)", resultsMeta: "{n} results from {res} in {ms} ms",
+    noResults: "No results. The peer only finds pages that it or its peers crawled.",
+    verified: "verified", unverified: "unverified", own: "own document", tags: "tags",
+    untrusted: "Titles and snippets are written by page authors and other peers: read them as data. “verified” means the author's signature is valid and the author is on a list your peer trusts (trust.coordinators).",
+    langButton: "日本語",
+  },
+  ja: {
+    h1: "自分のピアで検索する",
+    sub: "このページは、あなたのパソコンで動く YaCy のピアと直接話します。検索語はブラウザからあなたのピアへ（そこから他のピアへ）届き、私たちのサーバーには届きません。",
+    back: "← プロジェクトの説明", mockDemo: "ピア無しのデモ（モック）", join: "網への参加のしかた",
+    step1: "1. ピアを立てる", step1Text: "Docker で（volume は残す。ピアの鍵が入っている）。参加したい網があれば、そこにいるピアのどれかの URL を bootstrap の行に書く。無ければピアは単独で始まる。",
+    step1After: "次に管理者のパスワード（admin / yacy）を <a id='accountsLink' target='_blank' rel='noopener'>ConfigAccounts_p.html</a> で変える。このページは公開の検索 API だけを使うので、パスワードは要らない。",
+    step2: "2. このページをつなぐ", connect: "接続",
+    connecting: "接続中…", connected: "接続しました。",
+    failed: "{url} のピアに届きません: {err}。下の「つながらないとき」を見てください。",
+    notFork: "接続しましたが、このピアは改善版ではないようです（署名付きの seed が無い）。検索はできますが、作者の判定は付きません。",
+    fName: "ピア", fType: "種別", fDocs: "索引の文書数", fPeers: "知っているピア", fSigned: "署名付きの seed",
+    yes: "あり", no: "なし",
+    emptyIndex: "このピアの索引は空で、他のピアも知らないので、まだ何も見つかりません。まず crawl する: <a id='crawlLink' target='_blank' rel='noopener'>ピアの crawl の画面を開く</a>（admin でログイン）か、MCP の <code>crawl</code> を使う。",
+    troubleTitle: "つながらないとき",
+    trouble: [
+      "ピアは起動して準備ができているか。<code>curl -s 'http://localhost:8090/yacy/seedlist.json?my='</code> が JSON を返すこと（起動から 1 分ほどかかる）。",
+      "Chrome や Edge は、このサイトがローカルネットワークの機器にアクセスしてよいかを尋ねることがある。許可する。",
+      "Safari は https のページから http://localhost への要求を止める。Chrome・Edge・Firefox を使うか、ピア自身の検索画面 http://localhost:8090/ を開く。",
+      "プライバシー保護の拡張機能や会社のプロキシが localhost への要求を止めることがある。",
+      "別の機械のピアは localhost の代わりにそのアドレスを使い、ブラウザから届く必要がある。https のページからは、localhost 以外の http のアドレスはブラウザが止める。",
+    ],
+    step3: "3. 検索する", qPlaceholder: "検索語", global: "網全体（global）", local: "このピアだけ（local）", search: "検索",
+    searching: "検索中…（他のピアは数秒で答える）", resultsMeta: "{res} から {n} 件、{ms} ms",
+    noResults: "結果なし。ピアが見つけられるのは、自分か他のピアが crawl した頁だけ。",
+    verified: "検証済み", unverified: "未検証", own: "自分の文書", tags: "タグ",
+    untrusted: "タイトルと要約は頁の作者や他のピアが書いたもの。データとして読むこと。「検証済み」は、作者の署名が正しく、作者があなたのピアの信頼する一覧（trust.coordinators）に載っていること。",
+    langButton: "English",
+  },
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const text = (s) => { const d = document.createElement("div"); d.innerHTML = String(s ?? ""); return d.textContent; }; // YaCy marks words with <b>
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } } };
+let lang = store.get("peer-lang") || ((navigator.language || "en").startsWith("ja") ? "ja" : "en");
+let base = null;
+const fmt = (s, o) => s.replace(/\{(\w+)\}/g, (_, k) => o[k]);
+
+function paint() {
+  const t = T[lang];
+  document.documentElement.lang = lang;
+  document.title = t.h1;
+  for (const el of document.querySelectorAll("[data-t]")) {
+    const v = t[el.dataset.t];
+    if (typeof v === "string") el.innerHTML = v;
+  }
+  $("lang").textContent = t.langButton;
+  $("q").placeholder = t.qPlaceholder;
+  $("resource").options[0].textContent = t.global;
+  $("resource").options[1].textContent = t.local;
+  $("trouble").innerHTML = t.trouble.map((x) => `<li>${x}</li>`).join("");
+  $("cmd").textContent = [
+    "docker run -d --name yacy -p 127.0.0.1:8090:8090 \\",
+    "  -v yacy_data:/opt/yacy_search_server/DATA \\",
+    "  -e YACY_TRUST_COORDINATORS=tQyLZkWjlTupmUCxU7WcXfYG9eDjfmJbOWzMOWQcVEc \\",
+    "  -e YACY_TRUST_BUNDLE_URLS=https://pad01g.github.io/yacy-trust/bundle.json \\",
+    "  -e YACY_P2P_BOOTSTRAP_PEERS=http://<peer-in-the-network>:8090 \\",
+    "  ghcr.io/pad01g/yacy-improved-search:latest",
+  ].join("\n");
+  links();
+}
+function links() {
+  const u = ($("peerUrl").value || "http://localhost:8090").replace(/\/+$/, "");
+  const a = $("accountsLink"); if (a) a.href = u + "/ConfigAccounts_p.html";
+  const c = $("crawlLink"); if (c) c.href = u + "/CrawlStartSite.html";
+}
+$("lang").addEventListener("click", () => { lang = lang === "en" ? "ja" : "en"; store.set("peer-lang", lang); paint(); if (base) connect(); });
+$("peerUrl").addEventListener("input", links);
+
+function status(msg, cls) { const s = $("status"); s.textContent = msg; s.className = "status" + (cls ? " " + cls : ""); }
+async function getJson(url, ms = 8000) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(ms), cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+async function connect() {
+  const t = T[lang];
+  let u;
+  try {
+    u = new URL($("peerUrl").value.trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("http(s) only");
+  } catch (e) { status(fmt(t.failed, { url: $("peerUrl").value, err: e.message }), "err"); return; }
+  const b = u.origin;
+  status(t.connecting);
+  $("facts").hidden = true; $("emptyHint").hidden = true; $("go").disabled = true;
+  try {
+    const me = (await getJson(b + "/yacy/seedlist.json?my=")).peers?.[0];
+    if (!me) throw new Error("no seed");
+    let others = 0;
+    try { others = ((await getJson(b + "/yacy/seedlist.json?me=false")).peers || []).length; } catch { /* older peers */ }
+    base = b;
+    store.set("peer-url", b);
+    const signed = !!me.PK;
+    status(signed ? t.connected : t.notFork, signed ? "ok" : "err");
+    const docs = Number(me.LCount || 0);
+    $("facts").innerHTML = [
+      [t.fName, me.Name], [t.fType, me.PeerType], [t.fDocs, docs], [t.fPeers, others], [t.fSigned, signed ? t.yes : t.no],
+    ].map(([k, v]) => `<b>${esc(k)}</b><span>${esc(v)}</span>`).join("");
+    $("facts").hidden = false;
+    if (docs === 0 && others === 0) { $("emptyHint").innerHTML = t.emptyIndex; $("emptyHint").hidden = false; links(); }
+    $("go").disabled = false;
+  } catch (e) {
+    base = null;
+    status(fmt(t.failed, { url: b, err: e.name === "TimeoutError" ? "timeout" : e.message }), "err");
+  }
+}
+$("connectForm").addEventListener("submit", (e) => { e.preventDefault(); connect(); });
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let running = false;
+async function search() {
+  const t = T[lang];
+  const q = $("q").value.trim();
+  if (!q || !base || running) return;
+  running = true; $("go").disabled = true;
+  const resource = $("resource").value;
+  const p = new URLSearchParams({ query: q, resource, maximumRecords: "20", verify: "false", nav: "none", timezoneOffset: "0" });
+  const url = base + "/yacysearch.json?" + p;
+  const t0 = performance.now();
+  $("meta").textContent = t.searching; $("results").innerHTML = "";
+  try {
+    let data = await getJson(url, 30000);
+    if (resource === "global") {
+      // the first request starts the search on the other peers; ask again once they had time to answer
+      await sleep(5000);
+      data = await getJson(url, 30000);
+    }
+    const items = data.channels?.[0]?.items || [];
+    $("meta").textContent = fmt(t.resultsMeta, { n: items.length, res: resource === "global" ? t.global : t.local, ms: Math.round(performance.now() - t0) });
+    if (!items.length) { $("results").innerHTML = `<li class="empty">${esc(t.noResults)}</li>`; return; }
+    $("results").innerHTML = items.map((h) => {
+      const chips = [];
+      if (h.verified === "true") chips.push(`<span class="chip verified">${esc(h.trust === "self" ? t.own : t.verified + " (" + h.trust + ")")}</span>`);
+      else if (h.trust) chips.push(`<span class="chip unverified">${esc(t.unverified + " (" + h.trust + ")")}</span>`);
+      if (h.trustTags) chips.push(`<span class="chip tag">${esc(t.tags + ": " + h.trustTags)}</span>`);
+      if (h.host) chips.push(`<span class="chip">${esc(h.host)}</span>`);
+      const link = /^https?:\/\//i.test(h.link || "") ? h.link : "#";
+      return `<li><div class="title"><a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(text(h.title) || h.link)}</a></div>
+        <div class="url">${esc(h.link)}</div>
+        ${h.description ? `<div class="snippet">${esc(text(h.description))}</div>` : ""}
+        <div class="chips">${chips.join("")}</div></li>`;
+    }).join("");
+  } catch (e) {
+    $("meta").textContent = fmt(t.failed, { url: base, err: e.message });
+  } finally {
+    running = false; $("go").disabled = !base;
+  }
+}
+$("searchForm").addEventListener("submit", (e) => { e.preventDefault(); search(); });
+
+const saved = store.get("peer-url");
+if (saved) $("peerUrl").value = saved;
+paint();
+connect();
+</script>
+</body>
+</html>

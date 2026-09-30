@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YaCy 検索デモ</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8;
+  --accent: #2f5bd3; --accent-soft: #e6ecfb;
+  --good: #1d7a46; --good-soft: #e3f4ea; --bad: #b3261e; --bad-soft: #fbe5e3;
+  --warn: #8a5a00; --warn-soft: #fbf0d9; --info: #1f5f8b; --info-soft: #e1eef7; --chip: #eef0f4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171d; --panel: #1c2028; --text: #e4e7ee; --muted: #9aa3b4; --line: #2e3440;
+    --accent: #7ea2ff; --accent-soft: #232d45;
+    --good: #6fd29b; --good-soft: #1b3326; --bad: #ff8a80; --bad-soft: #3a1f1e;
+    --warn: #f0c060; --warn-soft: #3a3020; --info: #7cc0ec; --info-soft: #1c2d3b; --chip: #2a2f3a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+header { padding: 20px 24px 8px; max-width: 1400px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0; }
+main { max-width: 1400px; margin: 0 auto; padding: 8px 24px 40px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.pill.starting { background: var(--warn-soft); color: var(--warn); }
+.pill.ready { background: var(--good-soft); color: var(--good); }
+.pill.error { background: var(--bad-soft); color: var(--bad); }
+details summary { cursor: pointer; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td.role { white-space: normal; }
+.tablewrap { overflow-x: auto; }
+.progress { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 8px; font-size: 14px; }
+.progress b { color: var(--muted); font-weight: 600; }
+form { display: flex; gap: 8px; flex-wrap: wrap; }
+input[type=search] { flex: 1 1 320px; font: inherit; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+button { font: inherit; font-weight: 600; padding: 9px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.presets button { background: var(--chip); color: var(--text); font-weight: 500; padding: 4px 10px; font-size: 13px; }
+.hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; min-height: 1.2em; }
+.options { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 10px; font-size: 14px; align-items: center; }
+.options label { display: inline-flex; gap: 6px; align-items: center; }
+select { font: inherit; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+.col h2 { font-size: 16px; margin: 0 0 2px; }
+.col .desc { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+.meta { font-size: 13px; color: var(--muted); margin-bottom: 8px; min-height: 1.3em; }
+ol.results { list-style: none; margin: 0; padding: 0; }
+ol.results li { padding: 9px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 28px 1fr; gap: 0 6px; }
+.rank { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; padding-right: 4px; }
+.title a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.title a:hover { text-decoration: underline; }
+.url { color: var(--muted); font-size: 12px; word-break: break-all; }
+.snippet { font-size: 13px; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip { font-size: 12px; padding: 1px 7px; border-radius: 5px; background: var(--chip); color: var(--text); }
+.chip.relevant, .chip.verified { background: var(--good-soft); color: var(--good); }
+.chip.decoy, .chip.spam, .chip.unverified { background: var(--bad-soft); color: var(--bad); }
+.chip.ads { background: var(--warn-soft); color: var(--warn); }
+.chip.nat { background: var(--info-soft); color: var(--info); }
+.empty { color: var(--muted); font-size: 14px; padding: 10px 0; }
+.legend { font-size: 13px; color: var(--muted); }
+.legend .chip { margin-right: 2px; }
+.log { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); white-space: pre-wrap; margin: 8px 0 0; max-height: 160px; overflow: auto; }
+a.plain { color: var(--accent); }
+.trust h3 { font-size: 15px; margin: 14px 0 6px; }
+p.small { font-size: 13px; color: var(--muted); margin: 4px 0; }
+.trust .row { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 14px; margin: 6px 0; }
+.trust input[type=number] { width: 64px; font: inherit; padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+.trust input[type=text] { width: 140px; font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+.trust button.small { padding: 5px 12px; font-size: 13px; }
+.trust button.ghost { background: var(--chip); color: var(--text); }
+.trust .msg { font-size: 13px; min-height: 1.2em; margin-top: 6px; }
+.trust .msg.err { color: var(--bad); }
+.mockbar { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--info-soft); color: var(--info); font-size: 13px; }
+dialog { max-width: min(760px, 92vw); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+dialog .pagetext { white-space: pre-wrap; font-size: 14px; max-height: 60vh; overflow: auto; }
+.trust .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 4px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>YaCy 複数ノード検索デモ <span id="phase" class="pill starting">起動中</span></h1>
+  <p class="sub">同じサイトを crawl した 2 つの閉じた P2P 網（YaCy 本家 3 ノード / 改善版 6 ノード + リレー）に、同じクエリを global 検索で投げて並べる</p>
+  <p class="sub"><label title="docker compose を動かさずに、記録した本物の応答を画面の中で再生する"><input type="checkbox" id="mockToggle"> モック（サーバー無しで動かす）</label></p>
+  <div class="mockbar" id="mockBar" hidden></div>
+</header>
+<main>
+  <section class="panel" id="setup">
+    <details id="setupDetails" open>
+      <summary>網の状態: <span id="message">…</span></summary>
+      <div class="progress">
+        <b>改善版</b><span id="forkProgress">…</span>
+        <b>本家</b><span id="upProgress">…</span>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>ノード</th><th>役割</th><th>文書数</th><th>見えている senior</th><th>到達</th><th>種別</th><th>持っている信頼の一覧</th><th>管理画面</th></tr></thead>
+          <tbody id="nodes"></tbody>
+        </table>
+      </div>
+      <pre class="log" id="log"></pre>
+    </details>
+  </section>
+
+  <section class="panel">
+    <form id="form">
+      <input type="search" id="q" placeholder="検索語（例: bitcoin lightning channel）" autocomplete="off">
+      <button id="go" type="submit">両方で検索</button>
+    </form>
+    <div class="presets" id="presets"></div>
+    <p class="hint" id="hint"></p>
+    <div class="options">
+      <label title="信頼集合外の作者や署名の無い文書も「未検証」として、検証済みの後ろに出す（trust.search.acceptUnverified）"><input type="checkbox" id="open"> 開放モード（未検証の結果も出す）</label>
+      <label title="ads を宣言した作者の文書を捨てる（trust.policy.excludeTags=ads）"><input type="checkbox" id="noads"> 広告（ads タグ）を除外</label>
+      <label>他ピアを待つ時間 <select id="wait"><option value="3000">3 秒</option><option value="5000" selected>5 秒</option><option value="10000">10 秒</option></select></label>
+      <label>本家の問い合わせ元 <select id="upOrigin"><option>up-1</option><option>up-2</option><option>up-3</option></select></label>
+      <label>改善版の問い合わせ元 <select id="forkOrigin"><option>fork-1</option><option>fork-2</option><option>fork-3</option></select></label>
+    </div>
+  </section>
+
+  <section class="panel trust" id="trustPanel">
+    <details id="trustDetails">
+      <summary>コーディネータと信頼の一覧（改善版）</summary>
+      <p class="small">改善版は、利用者が設定したコーディネータの一覧に載った作者の文書だけを使う。ここで問い合わせ元が信頼するコーディネータを選び、コーディネータ A の一覧を書き換えて署名し直せる。変更は数十秒で各ノードに届く（「持っている信頼の一覧」の列で確かめられる）。</p>
+      <div class="grid">
+        <div>
+          <h3>問い合わせ元（<span id="modeNode">fork-1</span>）が信頼するコーディネータ</h3>
+          <div class="row">
+            <label><input type="checkbox" id="useA"> A（デモの運営者）</label>
+            <label><input type="checkbox" id="useB"> B（別の運営者: 一覧は evil-1 だけ）</label>
+          </div>
+          <div class="row"><label>両方のとき <select id="order"><option value="AB">A を優先</option><option value="BA">B を優先</option></select></label></div>
+          <div class="row">コーディネータが無いとき:
+            <label><input type="radio" name="fallback" value="self" checked> 自分の文書だけ（既定）</label>
+            <label><input type="radio" name="fallback" value="signedOnly"> 署名されたピアすべて</label>
+          </div>
+          <div class="row"><button type="button" class="small" id="applyMode">この設定にする</button></div>
+          <p class="small">B も信頼すると evil-1 のスパムが「検証済み」になる。どちらも外すと、他ピアの結果は出なくなる（「署名されたピアすべて」なら evil-1 も含めて出る）。</p>
+        </div>
+        <div>
+          <h3>コーディネータ A の一覧 <span id="listVersion"></span></h3>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>ピア</th><th>信頼</th><th>優先度 0–100</th><th>タグ（, 区切り）</th></tr></thead>
+              <tbody id="entries"></tbody>
+            </table>
+          </div>
+          <div class="row">
+            <label>配り方 <select id="target"><option value="all">全ノードに URL で渡す</option><option value="fork-2">fork-2 にだけ渡す（ピア間の交換で広がる）</option></select></label>
+          </div>
+          <div class="row"><button type="button" class="small" id="publish">署名して新しい版を配る</button> <button type="button" class="small ghost" id="reset">元に戻す</button></div>
+          <h3>A からオペレータへの委任 <span id="delegationState"></span></h3>
+          <div class="row"><button type="button" class="small ghost" id="revoke">委任を失効させる</button> <button type="button" class="small ghost" id="restore">委任し直す</button></div>
+          <p class="small">失効させると、A の一覧は無効になる（A の一覧に載ったピアの結果が消え、自分の文書だけが残る）。</p>
+        </div>
+      </div>
+      <div class="msg" id="trustMsg"></div>
+      <p class="small">鍵: <span id="keys"></span></p>
+    </details>
+  </section>
+
+  <section class="cols">
+    <div class="panel col">
+      <h2>YaCy 本家（upstream）</h2>
+      <p class="desc">信頼の仕組みが無い。網の誰かが持っている頁はすべて結果に混ざる。上のオプションは効かない</p>
+      <div class="meta" id="upMeta"></div>
+      <ol class="results" id="upResults"><li class="empty">検索するとここに結果が出ます</li></ol>
+    </div>
+    <div class="panel col">
+      <h2>改善版（pad01g/yacy_search_server improved-search）</h2>
+      <p class="desc">作者の署名を検証し、コーディネータの一覧に載った作者の文書だけを使う。NAT の内側のピアにもリレー経由で届く</p>
+      <div class="meta" id="forkMeta"></div>
+      <ol class="results" id="forkResults"><li class="empty">検索するとここに結果が出ます</li></ol>
+    </div>
+  </section>
+
+  <section class="panel legend">
+    <span class="chip relevant">正解</span> そのクエリの正解頁
+    <span class="chip decoy">罠</span> 1 語だけの詰め込み頁・中身の薄いタグ一覧頁
+    <span class="chip spam">スパム</span> 信頼集合外のピアが持つ頁
+    <span class="chip ads">広告</span> 広告を宣言したピアの頁
+    <span class="chip nat">NAT の内側</span> NAT の内側のピアだけが持つ頁
+    <span class="chip verified">検証済み</span> / <span class="chip unverified">未検証</span> 作者の署名の判定（改善版のみ）
+    · ノード名は、その頁のサイトを crawl したノード。結果の 1 回目は届いた順、最後に順位どおりに並べ直す
+  </section>
+</main>
+<dialog id="pageDialog"><h3 id="pageTitle"></h3><p class="small" id="pageUrl"></p><div class="pagetext" id="pageText"></div><form method="dialog"><button>閉じる</button></form></dialog>
+<script src="mock.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+let ready = false;
+let searching = false;
+let controller = null;
+let presetsShown = false;
+let collapsed = false;
+const hints = new Map();
+
+async function refresh() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    ready = s.phase === "ready" || s.phase === "degraded";
+    const phase = $("phase");
+    phase.className = "pill " + (s.phase === "degraded" ? "error" : s.phase);
+    phase.textContent = s.phase === "ready" ? "準備完了" : s.phase === "degraded" ? "一部停止" : s.phase === "error" ? "エラー" : "準備中";
+    $("message").textContent = s.message;
+    $("forkProgress").textContent = s.fork;
+    $("upProgress").textContent = s.upstream;
+    $("nodes").innerHTML = s.nodes.map((n) => `<tr>
+      <td>${esc(n.name)}</td><td class="role">${esc(n.role)}</td>
+      <td>${n.up ? n.docs : "起動中"}</td><td>${n.up ? n.seniors : "-"}</td>
+      <td>${esc(n.reach)}</td><td>${esc(n.type)}</td><td>${esc(n.trust || "-")}</td>
+      <td>${n.ui ? `<a class="plain" href="${esc(n.ui)}" target="_blank" rel="noopener">${esc(n.ui.replace("http://", ""))}</a>` : "（外から届かない）"}</td></tr>`).join("");
+    $("log").textContent = s.log.join("\n");
+    if (!presetsShown && s.presets) {
+      presetsShown = true;
+      for (const p of s.presets) hints.set(p.q, p.hint);
+      $("presets").innerHTML = s.presets.map((p) => `<button type="button" data-q="${esc(p.q)}">${esc(p.q)}</button>`).join("");
+    }
+    $("go").disabled = !ready || searching;
+    if (ready && !collapsed) { collapsed = true; $("setupDetails").open = false; }
+  } catch {
+    $("message").textContent = "デモのサーバーに接続できません";
+  }
+}
+setInterval(refresh, window.MOCK ? 15000 : 4000);
+refresh();
+for (const side of ["up", "fork"]) $(side + "Results").addEventListener("click", (e) => {
+  const a = e.target.closest("a[data-url]");
+  if (!a || !window.MOCK) return;
+  e.preventDefault();
+  const pg = window.MOCK.page(a.dataset.url);
+  $("pageTitle").textContent = pg.title || a.dataset.url;
+  $("pageUrl").textContent = a.dataset.url + "（モック: 記録した頁の本文）";
+  $("pageText").textContent = pg.text || "この頁は記録していません";
+  $("pageDialog").showModal();
+});
+
+$("presets").addEventListener("click", (e) => {
+  const q = e.target.closest("button")?.dataset.q;
+  if (!q) return;
+  $("q").value = q;
+  $("hint").textContent = hints.get(q) ?? "";
+  if (ready) run();
+});
+$("q").addEventListener("input", () => ($("hint").textContent = hints.get($("q").value.trim()) ?? ""));
+$("form").addEventListener("submit", (e) => { e.preventDefault(); if (ready) run(); });
+
+function render(side, data, final) {
+  const list = $(side + "Results");
+  if (!data.hits.length) { list.innerHTML = `<li class="empty">${final ? "結果なし" : "まだ届いていません…"}</li>`; return; }
+  list.innerHTML = data.hits.map((h) => {
+    const chips = [`<span class="chip">${esc(h.crawledBy)}</span>`];
+    if (h.judge === "relevant") chips.push(`<span class="chip relevant">正解</span>`);
+    if (h.judge === "decoy") chips.push(`<span class="chip decoy">罠</span>`);
+    if (h.kind === "スパム") chips.push(`<span class="chip spam">スパム</span>`);
+    if (h.kind === "広告") chips.push(`<span class="chip ads">広告</span>`);
+    if (h.kind === "NAT の内側") chips.push(`<span class="chip nat">NAT の内側</span>`);
+    if (side === "fork" && h.verified) chips.push(h.verified === "true" ? `<span class="chip verified">検証済み (${esc(h.trust)})</span>` : `<span class="chip unverified">未検証 (${esc(h.trust)})</span>`);
+    if (h.tags) chips.push(`<span class="chip ads">タグ: ${esc(h.tags)}</span>`);
+    return `<li><span class="rank">${h.rank}</span><div>
+      <div class="title"><a href="${window.MOCK ? "#" : "/page?url=" + encodeURIComponent(h.url)}" data-url="${esc(h.url)}" ${window.MOCK ? "" : 'target="_blank" rel="noopener"'}>${esc(h.title || h.url)}</a></div>
+      <div class="url">${esc(h.url)}</div>
+      ${h.snippet ? `<div class="snippet">${esc(h.snippet)}</div>` : ""}
+      <div class="chips">${chips.join("")}</div></div></li>`;
+  }).join("");
+}
+
+async function searchSide(side, q) {
+  const meta = $(side + "Meta");
+  const origin = $(side === "fork" ? "forkOrigin" : "upOrigin").value;
+  const body = { side: side === "fork" ? "fork" : "upstream", q, origin, open: $("open").checked ? "1" : "0", noads: $("noads").checked ? "1" : "0", wait: $("wait").value };
+  meta.textContent = `${origin} から検索中…`;
+  $(side + "Results").innerHTML = `<li class="empty">検索中…</li>`;
+  const res = await fetch("/api/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  let firstLine = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      const d = JSON.parse(line);
+      if (d.error) { meta.textContent = "エラー: " + d.error; $(side + "Results").innerHTML = ""; return; }
+      if (d.pass === 1) {
+        firstLine = `1 回目 ${d.ms} ms: ${d.hits.length} 件（届いた順）`;
+        meta.textContent = `${d.origin} から / ${firstLine} → 他ピアを待っています…`;
+        render(side, d, false);
+      } else {
+        meta.textContent = `${d.origin} から / ${firstLine} → 最終 ${d.ms} ms: ${d.hits.length} 件（順位どおり）`;
+        render(side, d, true);
+      }
+    }
+  }
+}
+
+// ---- コーディネータと信頼の一覧
+const ENTRY_NODES = ["fork-1", "fork-2", "fork-3", "nat-1", "ads-1", "evil-1"];
+let trust = null;
+let entriesDirty = false;
+let modeDirty = false;
+const trustMsg = (text, err) => { const m = $("trustMsg"); m.textContent = text; m.className = "msg" + (err ? " err" : ""); };
+function renderEntries() {
+  const e = trust.A.list.entries;
+  $("entries").innerHTML = ENTRY_NODES.map((n) => `<tr data-node="${n}">
+    <td>${esc(n)}</td>
+    <td><input type="checkbox" class="t" ${e[n]?.trusted ? "checked" : ""}></td>
+    <td><input type="number" class="p" min="0" max="100" value="${esc(e[n]?.priority ?? 100)}"></td>
+    <td><input type="text" class="g" value="${esc((e[n]?.tags ?? []).join(", "))}"></td></tr>`).join("");
+  entriesDirty = false;
+}
+function renderMode() {
+  const node = $("forkOrigin").value;
+  $("modeNode").textContent = node;
+  const m = trust.modes[node] ?? { coordinators: ["A"], fallback: "self" };
+  $("useA").checked = m.coordinators.includes("A");
+  $("useB").checked = m.coordinators.includes("B");
+  $("order").value = m.coordinators[0] === "B" && m.coordinators.includes("A") ? "BA" : "AB";
+  document.querySelector(`input[name=fallback][value=${m.fallback}]`).checked = true;
+  modeDirty = false;
+}
+async function loadTrust(force) {
+  try {
+    const t = await (await fetch("/api/trust")).json();
+    if (!t.ready) { $("trustMsg").textContent = "網の準備が終わると使えます"; return; }
+    const versionChanged = !trust || trust.A.list.version !== t.A.list.version;
+    trust = t;
+    $("listVersion").textContent = `（現在 v${t.A.list.version}）`;
+    $("delegationState").textContent = `（v${t.A.delegation.version}、${t.A.delegation.revoked ? "失効中" : "有効"}）`;
+    $("keys").textContent = `A コーディネータ ${t.A.coordinator} / A オペレータ ${t.A.operator} / B コーディネータ ${t.B.coordinator}`;
+    if (force || (versionChanged && !entriesDirty)) renderEntries();
+    if (force || !modeDirty) renderMode();
+  } catch { /* the server restarts */ }
+}
+$("entries").addEventListener("input", () => (entriesDirty = true));
+for (const id of ["useA", "useB", "order"]) $(id).addEventListener("change", () => (modeDirty = true));
+document.querySelectorAll("input[name=fallback]").forEach((r) => r.addEventListener("change", () => (modeDirty = true)));
+$("forkOrigin").addEventListener("change", () => trust && renderMode());
+$("reset").addEventListener("click", () => trust && renderEntries());
+async function trustPost(action, body, label) {
+  trustMsg(label + "…");
+  for (const b of document.querySelectorAll("#trustPanel button")) b.disabled = true;
+  try {
+    const r = await fetch("/api/trust/" + action, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.status);
+    trust = d;
+    trustMsg(label + (window.MOCK ? ": 済み（モックなのですぐ反映される）" : ": 済み。各ノードに届くまで数十秒かかる。上の「網の状態」の表で確かめてから検索すると確実"));
+    await loadTrust(true);
+  } catch (e) {
+    trustMsg(label + ": 失敗 " + e.message, true);
+  } finally {
+    for (const b of document.querySelectorAll("#trustPanel button")) b.disabled = false;
+  }
+}
+$("applyMode").addEventListener("click", () => {
+  const cs = [];
+  if ($("useA").checked) cs.push("A");
+  if ($("useB").checked) cs.push("B");
+  if (cs.length === 2 && $("order").value === "BA") cs.reverse();
+  const fallback = document.querySelector("input[name=fallback]:checked").value;
+  trustPost("mode", { node: $("forkOrigin").value, coordinators: cs, fallback }, `${$("forkOrigin").value} の信頼の設定`);
+});
+$("publish").addEventListener("click", () => {
+  const entries = {};
+  for (const tr of $("entries").querySelectorAll("tr")) {
+    entries[tr.dataset.node] = {
+      trusted: tr.querySelector(".t").checked,
+      priority: Number(tr.querySelector(".p").value),
+      tags: tr.querySelector(".g").value.split(",").map((x) => x.trim()).filter(Boolean),
+    };
+  }
+  trustPost("list", { entries, target: $("target").value }, "一覧の新しい版の配布");
+});
+$("revoke").addEventListener("click", () => trustPost("delegation", { revoked: true, target: $("target").value }, "委任の失効"));
+$("restore").addEventListener("click", () => trustPost("delegation", { revoked: false, target: $("target").value }, "委任のし直し"));
+setInterval(() => loadTrust(false), 5000);
+loadTrust(true);
+
+async function run() {
+  const q = $("q").value.trim();
+  if (!q || searching) return;
+  searching = true;
+  controller = new AbortController();
+  $("go").disabled = true;
+  try {
+    await Promise.all([searchSide("up", q), searchSide("fork", q)]);
+  } catch (e) {
+    if (e.name !== "AbortError") $("forkMeta").textContent = "エラー: " + e.message;
+  } finally {
+    searching = false;
+    $("go").disabled = !ready;
+  }
+}
+</script>
+</body>
+</html>

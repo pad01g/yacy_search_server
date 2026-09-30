@@ -79,6 +79,7 @@ p.small { font-size: 13px; color: var(--muted); margin: 4px 0; }
 .trust button.ghost { background: var(--chip); color: var(--text); }
 .trust .msg { font-size: 13px; min-height: 1.2em; margin-top: 6px; }
 .trust .msg.err { color: var(--bad); }
+.langbtn { background: var(--chip); color: var(--text); font-weight: 500; padding: 2px 10px; font-size: 13px; margin-left: 10px; }
 .mockbar { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--info-soft); color: var(--info); font-size: 13px; }
 dialog { max-width: min(760px, 92vw); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); }
 dialog::backdrop { background: rgba(0,0,0,.4); }
@@ -90,7 +91,7 @@ dialog .pagetext { white-space: pre-wrap; font-size: 14px; max-height: 60vh; ove
 <header>
   <h1>YaCy 複数ノード検索デモ <span id="phase" class="pill starting">起動中</span></h1>
   <p class="sub">同じサイトを crawl した 2 つの閉じた P2P 網（YaCy 本家 3 ノード / 改善版 6 ノード + リレー）に、同じクエリを global 検索で投げて並べる</p>
-  <p class="sub"><label title="docker compose を動かさずに、記録した本物の応答を画面の中で再生する"><input type="checkbox" id="mockToggle"> モック（サーバー無しで動かす）</label></p>
+  <p class="sub"><label title="docker compose を動かさずに、記録した本物の応答を画面の中で再生する"><input type="checkbox" id="mockToggle"> モック（サーバー無しで動かす）</label> <button type="button" id="langToggle" class="langbtn">English</button></p>
   <div class="mockbar" id="mockBar" hidden></div>
 </header>
 <main>
@@ -189,11 +190,12 @@ dialog .pagetext { white-space: pre-wrap; font-size: 14px; max-height: 60vh; ove
     <span class="chip spam">スパム</span> 信頼集合外のピアが持つ頁
     <span class="chip ads">広告</span> 広告を宣言したピアの頁
     <span class="chip nat">NAT の内側</span> NAT の内側のピアだけが持つ頁
-    <span class="chip verified">検証済み</span> / <span class="chip unverified">未検証</span> 作者の署名の判定（改善版のみ）
-    · ノード名は、その頁のサイトを crawl したノード。結果の 1 回目は届いた順、最後に順位どおりに並べ直す
+    <span class="chip verified">検証済み</span> / <span class="chip unverified">未検証</span> <span>作者の署名の判定（改善版のみ）</span>
+    <span>· ノード名は、その頁のサイトを crawl したノード。結果の 1 回目は届いた順、最後に順位どおりに並べ直す</span>
   </section>
 </main>
 <dialog id="pageDialog"><h3 id="pageTitle"></h3><p class="small" id="pageUrl"></p><div class="pagetext" id="pageText"></div><form method="dialog"><button>閉じる</button></form></dialog>
+<script src="i18n.js"></script>
 <script src="mock.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -211,25 +213,25 @@ async function refresh() {
     ready = s.phase === "ready" || s.phase === "degraded";
     const phase = $("phase");
     phase.className = "pill " + (s.phase === "degraded" ? "error" : s.phase);
-    phase.textContent = s.phase === "ready" ? "準備完了" : s.phase === "degraded" ? "一部停止" : s.phase === "error" ? "エラー" : "準備中";
-    $("message").textContent = s.message;
-    $("forkProgress").textContent = s.fork;
-    $("upProgress").textContent = s.upstream;
+    phase.textContent = t(s.phase === "ready" ? "準備完了" : s.phase === "degraded" ? "一部停止" : s.phase === "error" ? "エラー" : "準備中");
+    $("message").textContent = t(s.message);
+    $("forkProgress").textContent = t(s.fork);
+    $("upProgress").textContent = t(s.upstream);
     $("nodes").innerHTML = s.nodes.map((n) => `<tr>
-      <td>${esc(n.name)}</td><td class="role">${esc(n.role)}</td>
-      <td>${n.up ? n.docs : "起動中"}</td><td>${n.up ? n.seniors : "-"}</td>
+      <td>${esc(n.name)}</td><td class="role">${esc(t(n.role))}</td>
+      <td>${n.up ? n.docs : esc(t("起動中"))}</td><td>${n.up ? n.seniors : "-"}</td>
       <td>${esc(n.reach)}</td><td>${esc(n.type)}</td><td>${esc(n.trust || "-")}</td>
-      <td>${n.ui ? `<a class="plain" href="${esc(n.ui)}" target="_blank" rel="noopener">${esc(n.ui.replace("http://", ""))}</a>` : "（外から届かない）"}</td></tr>`).join("");
+      <td>${n.ui ? `<a class="plain" href="${esc(n.ui)}" target="_blank" rel="noopener">${esc(n.ui.replace("http://", ""))}</a>` : esc(t("（外から届かない）"))}</td></tr>`).join("");
     $("log").textContent = s.log.join("\n");
     if (!presetsShown && s.presets) {
       presetsShown = true;
-      for (const p of s.presets) hints.set(p.q, p.hint);
+      for (const p of s.presets) hints.set(p.q, t(p.hint));
       $("presets").innerHTML = s.presets.map((p) => `<button type="button" data-q="${esc(p.q)}">${esc(p.q)}</button>`).join("");
     }
     $("go").disabled = !ready || searching;
     if (ready && !collapsed) { collapsed = true; $("setupDetails").open = false; }
   } catch {
-    $("message").textContent = "デモのサーバーに接続できません";
+    $("message").textContent = t("デモのサーバーに接続できません");
   }
 }
 setInterval(refresh, window.MOCK ? 15000 : 4000);
@@ -240,8 +242,8 @@ for (const side of ["up", "fork"]) $(side + "Results").addEventListener("click",
   e.preventDefault();
   const pg = window.MOCK.page(a.dataset.url);
   $("pageTitle").textContent = pg.title || a.dataset.url;
-  $("pageUrl").textContent = a.dataset.url + "（モック: 記録した頁の本文）";
-  $("pageText").textContent = pg.text || "この頁は記録していません";
+  $("pageUrl").textContent = a.dataset.url + t("（モック: 記録した頁の本文）");
+  $("pageText").textContent = pg.text || t("この頁は記録していません");
   $("pageDialog").showModal();
 });
 
@@ -257,16 +259,16 @@ $("form").addEventListener("submit", (e) => { e.preventDefault(); if (ready) run
 
 function render(side, data, final) {
   const list = $(side + "Results");
-  if (!data.hits.length) { list.innerHTML = `<li class="empty">${final ? "結果なし" : "まだ届いていません…"}</li>`; return; }
+  if (!data.hits.length) { list.innerHTML = `<li class="empty">${esc(t(final ? "結果なし" : "まだ届いていません…"))}</li>`; return; }
   list.innerHTML = data.hits.map((h) => {
     const chips = [`<span class="chip">${esc(h.crawledBy)}</span>`];
-    if (h.judge === "relevant") chips.push(`<span class="chip relevant">正解</span>`);
-    if (h.judge === "decoy") chips.push(`<span class="chip decoy">罠</span>`);
-    if (h.kind === "スパム") chips.push(`<span class="chip spam">スパム</span>`);
-    if (h.kind === "広告") chips.push(`<span class="chip ads">広告</span>`);
-    if (h.kind === "NAT の内側") chips.push(`<span class="chip nat">NAT の内側</span>`);
-    if (side === "fork" && h.verified) chips.push(h.verified === "true" ? `<span class="chip verified">検証済み (${esc(h.trust)})</span>` : `<span class="chip unverified">未検証 (${esc(h.trust)})</span>`);
-    if (h.tags) chips.push(`<span class="chip ads">タグ: ${esc(h.tags)}</span>`);
+    if (h.judge === "relevant") chips.push(`<span class="chip relevant">${t("正解")}</span>`);
+    if (h.judge === "decoy") chips.push(`<span class="chip decoy">${t("罠")}</span>`);
+    if (h.kind === "スパム") chips.push(`<span class="chip spam">${t("スパム")}</span>`);
+    if (h.kind === "広告") chips.push(`<span class="chip ads">${t("広告")}</span>`);
+    if (h.kind === "NAT の内側") chips.push(`<span class="chip nat">${t("NAT の内側")}</span>`);
+    if (side === "fork" && h.verified) chips.push(h.verified === "true" ? `<span class="chip verified">${esc(t("検証済み ({trust})", { trust: h.trust }))}</span>` : `<span class="chip unverified">${esc(t("未検証 ({trust})", { trust: h.trust }))}</span>`);
+    if (h.tags) chips.push(`<span class="chip ads">${esc(t("タグ: {tags}", { tags: h.tags }))}</span>`);
     return `<li><span class="rank">${h.rank}</span><div>
       <div class="title"><a href="${window.MOCK ? "#" : "/page?url=" + encodeURIComponent(h.url)}" data-url="${esc(h.url)}" ${window.MOCK ? "" : 'target="_blank" rel="noopener"'}>${esc(h.title || h.url)}</a></div>
       <div class="url">${esc(h.url)}</div>
@@ -279,8 +281,8 @@ async function searchSide(side, q) {
   const meta = $(side + "Meta");
   const origin = $(side === "fork" ? "forkOrigin" : "upOrigin").value;
   const body = { side: side === "fork" ? "fork" : "upstream", q, origin, open: $("open").checked ? "1" : "0", noads: $("noads").checked ? "1" : "0", wait: $("wait").value };
-  meta.textContent = `${origin} から検索中…`;
-  $(side + "Results").innerHTML = `<li class="empty">検索中…</li>`;
+  meta.textContent = t("{origin} から検索中…", { origin });
+  $(side + "Results").innerHTML = `<li class="empty">${esc(t("検索中…"))}</li>`;
   const res = await fetch("/api/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
   const reader = res.body.getReader();
   const dec = new TextDecoder();
@@ -295,13 +297,14 @@ async function searchSide(side, q) {
       const line = buf.slice(0, i); buf = buf.slice(i + 1);
       if (!line.trim()) continue;
       const d = JSON.parse(line);
-      if (d.error) { meta.textContent = "エラー: " + d.error; $(side + "Results").innerHTML = ""; return; }
+      if (d.error) { meta.textContent = t("エラー: {e}", { e: t(d.error) }); $(side + "Results").innerHTML = ""; return; }
+      const from = String(d.origin).replace("（記録に無いクエリ: 近似）", t("（記録に無いクエリ: 近似）"));
       if (d.pass === 1) {
-        firstLine = `1 回目 ${d.ms} ms: ${d.hits.length} 件（届いた順）`;
-        meta.textContent = `${d.origin} から / ${firstLine} → 他ピアを待っています…`;
+        firstLine = t("1 回目 {ms} ms: {n} 件（届いた順）", { ms: d.ms, n: d.hits.length });
+        meta.textContent = t("{origin} から / {first} → 他ピアを待っています…", { origin: from, first: firstLine });
         render(side, d, false);
       } else {
-        meta.textContent = `${d.origin} から / ${firstLine} → 最終 ${d.ms} ms: ${d.hits.length} 件（順位どおり）`;
+        meta.textContent = t("{origin} から / {first} → 最終 {ms} ms: {n} 件（順位どおり）", { origin: from, first: firstLine, ms: d.ms, n: d.hits.length });
         render(side, d, true);
       }
     }
@@ -335,13 +338,13 @@ function renderMode() {
 }
 async function loadTrust(force) {
   try {
-    const t = await (await fetch("/api/trust")).json();
-    if (!t.ready) { $("trustMsg").textContent = "網の準備が終わると使えます"; return; }
-    const versionChanged = !trust || trust.A.list.version !== t.A.list.version;
-    trust = t;
-    $("listVersion").textContent = `（現在 v${t.A.list.version}）`;
-    $("delegationState").textContent = `（v${t.A.delegation.version}、${t.A.delegation.revoked ? "失効中" : "有効"}）`;
-    $("keys").textContent = `A コーディネータ ${t.A.coordinator} / A オペレータ ${t.A.operator} / B コーディネータ ${t.B.coordinator}`;
+    const tr = await (await fetch("/api/trust")).json();
+    if (!tr.ready) { $("trustMsg").textContent = t("網の準備が終わると使えます"); return; }
+    const versionChanged = !trust || trust.A.list.version !== tr.A.list.version;
+    trust = tr;
+    $("listVersion").textContent = t("（現在 v{v}）", { v: tr.A.list.version });
+    $("delegationState").textContent = t("（v{v}、{state}）", { v: tr.A.delegation.version, state: t(tr.A.delegation.revoked ? "失効中" : "有効") });
+    $("keys").textContent = t("A コーディネータ {a} / A オペレータ {o} / B コーディネータ {b}", { a: tr.A.coordinator, o: tr.A.operator, b: tr.B.coordinator });
     if (force || (versionChanged && !entriesDirty)) renderEntries();
     if (force || !modeDirty) renderMode();
   } catch { /* the server restarts */ }
@@ -352,17 +355,17 @@ document.querySelectorAll("input[name=fallback]").forEach((r) => r.addEventListe
 $("forkOrigin").addEventListener("change", () => trust && renderMode());
 $("reset").addEventListener("click", () => trust && renderEntries());
 async function trustPost(action, body, label) {
-  trustMsg(label + "…");
+  trustMsg(t("{label}…", { label }));
   for (const b of document.querySelectorAll("#trustPanel button")) b.disabled = true;
   try {
     const r = await fetch("/api/trust/" + action, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.status);
     trust = d;
-    trustMsg(label + (window.MOCK ? ": 済み（モックなのですぐ反映される）" : ": 済み。各ノードに届くまで数十秒かかる。上の「網の状態」の表で確かめてから検索すると確実"));
+    trustMsg(t(window.MOCK ? "{label}: 済み（モックなのですぐ反映される）" : "{label}: 済み。各ノードに届くまで数十秒かかる。上の「網の状態」の表で確かめてから検索すると確実", { label }));
     await loadTrust(true);
   } catch (e) {
-    trustMsg(label + ": 失敗 " + e.message, true);
+    trustMsg(t("{label}: 失敗 {e}", { label, e: e.message }), true);
   } finally {
     for (const b of document.querySelectorAll("#trustPanel button")) b.disabled = false;
   }
@@ -373,7 +376,7 @@ $("applyMode").addEventListener("click", () => {
   if ($("useB").checked) cs.push("B");
   if (cs.length === 2 && $("order").value === "BA") cs.reverse();
   const fallback = document.querySelector("input[name=fallback]:checked").value;
-  trustPost("mode", { node: $("forkOrigin").value, coordinators: cs, fallback }, `${$("forkOrigin").value} の信頼の設定`);
+  trustPost("mode", { node: $("forkOrigin").value, coordinators: cs, fallback }, t("{node} の信頼の設定", { node: $("forkOrigin").value }));
 });
 $("publish").addEventListener("click", () => {
   const entries = {};
@@ -384,10 +387,10 @@ $("publish").addEventListener("click", () => {
       tags: tr.querySelector(".g").value.split(",").map((x) => x.trim()).filter(Boolean),
     };
   }
-  trustPost("list", { entries, target: $("target").value }, "一覧の新しい版の配布");
+  trustPost("list", { entries, target: $("target").value }, t("一覧の新しい版の配布"));
 });
-$("revoke").addEventListener("click", () => trustPost("delegation", { revoked: true, target: $("target").value }, "委任の失効"));
-$("restore").addEventListener("click", () => trustPost("delegation", { revoked: false, target: $("target").value }, "委任のし直し"));
+$("revoke").addEventListener("click", () => trustPost("delegation", { revoked: true, target: $("target").value }, t("委任の失効")));
+$("restore").addEventListener("click", () => trustPost("delegation", { revoked: false, target: $("target").value }, t("委任のし直し")));
 setInterval(() => loadTrust(false), 5000);
 loadTrust(true);
 
@@ -400,7 +403,7 @@ async function run() {
   try {
     await Promise.all([searchSide("up", q), searchSide("fork", q)]);
   } catch (e) {
-    if (e.name !== "AbortError") $("forkMeta").textContent = "エラー: " + e.message;
+    if (e.name !== "AbortError") $("forkMeta").textContent = t("エラー: {e}", { e: e.message });
   } finally {
     searching = false;
     $("go").disabled = !ready;

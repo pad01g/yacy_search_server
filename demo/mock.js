@@ -20,7 +20,7 @@
     t.checked = wanted;
     if (onPages) {
       t.disabled = true;
-      t.parentElement.title = "GitHub Pages にはデモのサーバーが無いので、常にモックで動く";
+      t.parentElement.title = window.t("GitHub Pages にはデモのサーバーが無いので、常にモックで動く");
     }
     t.addEventListener("change", () => {
       try { localStorage.setItem("yacy-demo-mock", t.checked ? "1" : "0"); } catch { /* ignore */ }
@@ -57,18 +57,16 @@
     if (!bar) return;
     const at = new Date(data.recordedAt).toLocaleString();
     bar.hidden = false;
-    bar.textContent = `モックで動いています: ${at} に本物のデモ（本家 3 ノード / 改善版 6 ノード + リレー）で記録した応答を再生しています。` +
-      "プリセットのクエリは記録どおり、それ以外のクエリは記録した頁から画面の中で探した近似です。" +
-      "開放モード・広告の除外・コーディネータの選択・一覧の編集・委任の失効は、記録した結果に当てはめた近似です（優先度の変更は順位に反映しません）。";
+    bar.textContent = window.t("モックで動いています: {at} に本物のデモ（本家 3 ノード / 改善版 6 ノード + リレー）で記録した応答を再生しています。プリセットのクエリは記録どおり、それ以外のクエリは記録した頁から画面の中で探した近似です。開放モード・広告の除外・コーディネータの選択・一覧の編集・委任の失効は、記録した結果に当てはめた近似です（優先度の変更は順位に反映しません）。", { at });
     if (onPages) {
       const a = document.createElement("a");
       a.href = "../";
-      a.textContent = " プロジェクトの説明へ戻る";
+      a.textContent = window.t(" プロジェクトの説明へ戻る");
       a.className = "plain";
       bar.append(a);
       const own = document.createElement("a");
       own.href = "peer.html";
-      own.textContent = " / 自分のピアで本物の検索をする";
+      own.textContent = window.t(" / 自分のピアで本物の検索をする");
       own.className = "plain";
       bar.append(own);
     }
@@ -81,12 +79,12 @@
     const s = JSON.parse(JSON.stringify(data.state));
     s.phase = "ready";
     s.message = "準備完了（モック: 記録した応答）";
-    s.log = [...(s.log || []).slice(-4), "モック: サーバー無しで、記録した応答を再生しています"];
+    s.log = [...(window.LANG === "en" ? [] : (s.log || []).slice(-4)), window.t("モック: サーバー無しで、記録した応答を再生しています")];
     for (const n of s.nodes) {
       n.ui = null;
       if (n.side !== "fork") continue;
       const own = n.name === "fork-1";
-      n.trust = `A: 委任 v${trust.A.delegation.version}${trust.A.delegation.revoked ? "（失効）" : ""} 一覧 v${trust.A.list.version}` + (own ? " / B: 委任 v1 一覧 v1" : "");
+      n.trust = window.t("A: 委任 v{d}{r} 一覧 v{l}", { d: trust.A.delegation.version, r: trust.A.delegation.revoked ? window.t("（失効）") : "", l: trust.A.list.version }) + (own ? window.t(" / B: 委任 v1 一覧 v1") : "");
     }
     return s;
   }
@@ -167,7 +165,7 @@
       async start(ctl) {
         await loaded;
         const line = (o) => ctl.enqueue(enc.encode(JSON.stringify(o) + "\n"));
-        if (!q) { line({ error: "クエリが空です" }); ctl.close(); return; }
+        if (!q) { line({ error: window.t("クエリが空です") }); ctl.close(); return; }
         const mode = trust.modes["fork-1"] || { coordinators: ["A"], fallback: "self" };
         const base = baseResult(side, q, mode);
         const fix = (hits) => (side === "fork" ? adjustFork(hits, base.config, mode, "fork-1", open, noads) : hits.map((h, i) => ({ ...h, rank: i + 1 })));
@@ -230,7 +228,7 @@
   loaded.catch((e) => {
     document.addEventListener("DOMContentLoaded", () => {
       const bar = document.getElementById("mockBar");
-      if (bar) { bar.hidden = false; bar.textContent = "モックのデータを読めませんでした: " + e.message; }
+      if (bar) { bar.hidden = false; bar.textContent = window.t("モックのデータを読めませんでした: {e}", { e: e.message }); }
     });
   });
 })();

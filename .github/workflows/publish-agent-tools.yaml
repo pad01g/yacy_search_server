@@ -5,7 +5,7 @@ name: Publish images and MCP server
 #   ghcr.io/pad01g/yacy-sidecar          the libp2p sidecar for NAT traversal (sidecar/)
 #   ghcr.io/pad01g/yacy-search-mcp       the MCP server (mcp/)
 # A tag mcp-v<version> (the version of mcp/package.json) also pushes the MCP image as :<version> and publishes
-# mcp/server.json to the MCP registry. A manual run only updates :latest and :sha-<commit>.
+# mcp/server.json to the MCP registry and creates a GitHub release. A manual run only updates :latest and :sha-<commit>.
 # Only commits on the default branch are published. The images and registry jobs run in the environment "release",
 # which only the default branch and mcp-v* tags may use (tags mcp-v* can only be created by administrators).
 
@@ -163,3 +163,24 @@ jobs:
       - name: Publish mcp/server.json
         working-directory: mcp
         run: ../mcp-publisher publish
+
+  github-release:
+    needs: [check, mcp-registry]
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: GitHub release for the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && { echo "release exists"; exit 0; }
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --verify-tag --title "MCP server $VERSION" --notes "MCP server \`io.github.pad01g/yacy-search\` $VERSION (MIT, directory \`mcp/\`).
+
+          - Docker image: \`ghcr.io/pad01g/yacy-search-mcp:$VERSION\`
+          - Registry: https://registry.modelcontextprotocol.io (name \`io.github.pad01g/yacy-search\`)
+          - Also published from this commit: \`ghcr.io/pad01g/yacy-improved-search\` and \`ghcr.io/pad01g/yacy-sidecar\` (\`sha-<commit>\` tags)
+          - How to use and join: https://pad01g.github.io/yacy_search_server/join.html"

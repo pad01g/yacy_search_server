@@ -3,7 +3,7 @@
   "name": "io.github.pad01g/yacy-search",
   "title": "YaCy peer-to-peer search",
   "description": "Web search, crawling and ranking evaluation on your own YaCy peer: no API key, no central service.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "websiteUrl": "https://pad01g.github.io/yacy_search_server/",
   "repository": {
     "url": "https://github.com/pad01g/yacy_search_server",
@@ -13,7 +13,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/pad01g/yacy-search-mcp:0.2.0",
+      "identifier": "ghcr.io/pad01g/yacy-search-mcp:0.2.1",
       "transport": {
         "type": "stdio"
       },

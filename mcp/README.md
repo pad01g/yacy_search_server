@@ -19,7 +19,7 @@ docker run -d --name yacy --network yacy -p 127.0.0.1:8090:8090 \
 
 # Claude Code
 claude mcp add yacy -- docker run -i --rm --network yacy \
-  -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD='<your password>' ghcr.io/pad01g/yacy-search-mcp:0.2.0
+  -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD='<your password>' ghcr.io/pad01g/yacy-search-mcp:0.2.1
 ```
 
 The fork's image starts with the administrator account `admin` / `yacy`: change the password at
@@ -32,7 +32,7 @@ Other clients (`mcp.json` style):
   "mcpServers": {
     "yacy": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "--network", "yacy", "-e", "YACY_URL=http://yacy:8090", "-e", "YACY_ADMIN_PASSWORD=<your password>", "ghcr.io/pad01g/yacy-search-mcp:0.2.0"]
+      "args": ["run", "-i", "--rm", "--network", "yacy", "-e", "YACY_URL=http://yacy:8090", "-e", "YACY_ADMIN_PASSWORD=<your password>", "ghcr.io/pad01g/yacy-search-mcp:0.2.1"]
     }
   }
 }

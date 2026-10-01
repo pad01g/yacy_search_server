@@ -23,16 +23,16 @@ test("all tools against a live peer", { skip: !live && "set YACY_URL (and YACY_A
       return JSON.parse(res.content[0].text);
     };
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["crawl", "crawl_control", "crawls", "delete_document", "evaluate_ranking", "get_ranking_settings", "index_status", "peers", "search", "set_ranking_setting", "trust_status"]);
+    assert.deepEqual(tools, ["control_crawl", "crawl_site", "delete_document", "evaluate_ranking", "get_index_status", "get_ranking_settings", "get_trust_status", "list_crawls", "list_peers", "search_web", "set_ranking_setting"]);
 
-    const status = await call("index_status");
-    console.log("index_status", JSON.stringify(status));
+    const status = await call("get_index_status");
+    console.log("get_index_status", JSON.stringify(status));
     assert.ok(status.connectedPeers >= 0);
-    const peers = await call("peers", { limit: 5 });
-    console.log("peers", peers.length);
-    const found = await call("search", { query, count: 10, waitMs: 3000 });
+    const peers = await call("list_peers", { limit: 5 });
+    console.log("list_peers", peers.length);
+    const found = await call("search_web", { query, count: 10, waitMs: 3000 });
     console.log(
-      "search",
+      "search_web",
       found.total,
       found.results.slice(0, 3).map((x: { url: string; verified: boolean }) => `${x.url} verified=${x.verified}`),
     );
@@ -46,28 +46,28 @@ test("all tools against a live peer", { skip: !live && "set YACY_URL (and YACY_A
     console.log("evaluate_ranking", JSON.stringify(evaluation.mean));
     assert.ok(evaluation.mean.recallAtK > 0);
     if (process.env.YACY_TEST_CRAWL) {
-      const crawl = await call("crawl", { url: process.env.YACY_TEST_CRAWL, depth: 0, maxPages: 10 });
-      console.log("crawl", crawl.message);
+      const crawl = await call("crawl_site", { url: process.env.YACY_TEST_CRAWL, depth: 0, maxPages: 10 });
+      console.log("crawl_site", crawl.message);
       assert.match(crawl.message, /started/);
-      const running = await call("crawls");
+      const running = await call("list_crawls");
       const host = new URL(process.env.YACY_TEST_CRAWL!).hostname;
       const mine = running.find((c: { name: string }) => c.name === host);
       assert.ok(mine, "the new crawl is listed");
-      const stopped = await call("crawl_control", { action: "stop", handle: mine.handle });
+      const stopped = await call("control_crawl", { action: "stop", handle: mine.handle });
       assert.ok(!stopped.crawls.some((c: { handle: string }) => c.handle === mine.handle), "the crawl is gone after stop");
     }
-    console.log("crawls", (await call("crawls")).length);
-    assert.equal((await call("crawl_control", { action: "pause" })).action, "pause");
-    assert.equal((await call("crawl_control", { action: "resume" })).action, "resume");
-    const noHandle = (await client.callTool({ name: "crawl_control", arguments: { action: "stop" } })) as { isError?: boolean };
+    console.log("list_crawls", (await call("list_crawls")).length);
+    assert.equal((await call("control_crawl", { action: "pause" })).action, "pause");
+    assert.equal((await call("control_crawl", { action: "resume" })).action, "resume");
+    const noHandle = (await client.callTool({ name: "control_crawl", arguments: { action: "stop" } })) as { isError?: boolean };
     assert.ok(noHandle.isError, "stop without a handle is refused");
     if (process.env.YACY_TEST_DELETE) {
       const del = await call("delete_document", { url: process.env.YACY_TEST_DELETE });
       console.log("delete_document", del.result);
       assert.match(del.result, /Removed URL/);
     }
-    const trust = await call("trust_status");
-    console.log("trust_status", trust.length, "envelopes");
+    const trust = await call("get_trust_status");
+    console.log("get_trust_status", trust.length, "envelopes");
     // a bad key is refused by the schema, not sent to YaCy
     const bad = (await client.callTool({ name: "set_ranking_setting", arguments: { key: "adminAccountBase64MD5", value: "x" } })) as { isError?: boolean };
     assert.ok(bad.isError);

@@ -1,6 +1,6 @@
 {
   "name": "yacy-search-mcp",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "description": "MCP server for a YaCy peer: peer-to-peer web search, crawling, ranking settings and search quality evaluation",
   "license": "MIT",

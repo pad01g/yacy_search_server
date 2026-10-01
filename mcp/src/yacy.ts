@@ -208,7 +208,7 @@ export class YaCy {
     const res = await this.admin("/IndexControlURLs_p.html", { method: "POST", body: new URLSearchParams({ urlstring: url, urldelete: "", transactionToken: token }), signal });
     if (!res.ok) throw new Error(`delete failed: HTTP ${res.status}`);
     const plain = (await res.text()).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
-    return plain.match(/(Removed URL [^ ]+|No input given[^.]*\.|No Entry for URL[^.]*\.)/)?.[0] ?? "YaCy did not report the result; check with search resource 'local'.";
+    return plain.match(/(Removed URL [^ ]+|No input given[^.]*\.|No Entry for URL[^.]*\.)/)?.[0] ?? "YaCy did not report the result; check with search_web, resource 'local'.";
   }
 
   async seeds(me: boolean, signal?: AbortSignal): Promise<Record<string, string>[]> {

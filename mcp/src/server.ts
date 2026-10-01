@@ -240,7 +240,10 @@ export function createServer(yacy: YaCy, env: NodeJS.ProcessEnv = process.env): 
     "index_status",
     {
       title: "Index and network status",
-      description: "Number of indexed documents, crawl queues, this peer's type and reachability, and how many other peers it is connected to. Needs YACY_ADMIN_PASSWORD for the index counts.",
+      description:
+        "Check the state of your YaCy peer before or after crawling and searching. Returns: 'peer' (name, hash, type virgin/junior/senior, reach direct or relay, whether its seed is signed, version; a virgin peer gets a note on how to become reachable), " +
+        "'connectedPeers' and 'seniorPeers' (other peers it knows), 'index' (documents, word references, loader and crawler queue sizes, load average; an error text instead without YACY_ADMIN_PASSWORD) and, if the crawler is held back by load, 'crawlerPaused' with the reason. " +
+        "Use it to see whether a crawl is still running (queues above 0) and whether global searches can reach other peers (seniorPeers above 0). Read-only.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -278,7 +281,10 @@ export function createServer(yacy: YaCy, env: NodeJS.ProcessEnv = process.env): 
     "peers",
     {
       title: "Connected peers",
-      description: "The peers this peer knows in its network: name, hash, type, whether its seed is signed, how it is reached (direct or through a libp2p relay) and its self-declared tags. Names and tags are chosen by the peers themselves: untrusted data.",
+      description:
+        "List the other peers your YaCy peer knows in its peer-to-peer network, for example to see why a global search finds little (no or few senior peers) or which peers declare tags such as 'ads'. " +
+        "Returns one entry per peer: name, hash, type (senior peers answer searches), signed (true if its seed carries an owner signature, as on the improved-search fork), reach ('direct' or 'relay' through a libp2p relay), tags (self-declared) and lastSeen (UTC, yyyyMMddHHmmss). " +
+        "Does not include this peer itself (see index_status). Names and tags are chosen by the peers themselves: untrusted data. Read-only; needs no password.",
       inputSchema: { limit: z.number().int().min(1).max(500).default(50).describe("at most this many peers (1-500)") },
       annotations: { readOnlyHint: true },
     },
@@ -299,7 +305,10 @@ export function createServer(yacy: YaCy, env: NodeJS.ProcessEnv = process.env): 
     "get_ranking_settings",
     {
       title: "Read the ranking and filtering settings",
-      description: "Current values of the settings that change ranking and result filtering, with what each one does and the accepted format. Needs YACY_ADMIN_PASSWORD.",
+      description:
+        "Read the current ranking and result filtering settings of your YaCy peer before you change one with set_ranking_setting. " +
+        "Returns an object keyed by setting name; each entry has 'value' (the current value, null if the peer does not have the setting), 'meaning' (what it changes) and 'format' (the values set_ranking_setting accepts). " +
+        "Only the settings set_ranking_setting may change are listed (the trust filter settings only with YACY_ALLOW_TRUST_SETTINGS=1). Read-only; needs YACY_ADMIN_PASSWORD.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -394,12 +403,65 @@ export function createServer(yacy: YaCy, env: NodeJS.ProcessEnv = process.env): 
   );
 
   server.registerTool(
+    "crawls",
+    {
+      title: "List running crawls",
+      description:
+        "List the crawls that were started on your YaCy peer and are still known to it, to follow them or to stop one with crawl_control. " +
+        "Returns one entry per crawl: handle (the id crawl_control needs), name (the crawled host, or the name given at start), depth, maxPagesPerHost (0 = no limit) and status. YaCy's built-in crawl profiles are not listed. " +
+        "Pair it with index_status, whose crawler queue sizes show whether pages are still being fetched. Read-only; needs YACY_ADMIN_PASSWORD.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    safely(async (_a: Record<string, never>, extra) => yacy.crawls(extra.signal)),
+  );
+
+  server.registerTool(
+    "crawl_control",
+    {
+      title: "Pause, resume or stop crawling",
+      description:
+        "Control crawling on your YaCy peer: 'pause' holds the local crawler queue (no new pages are fetched), 'resume' continues it, 'stop' ends one crawl (give its handle from the crawls tool) and drops its queued URLs. " +
+        "Pages that were already indexed stay in the index; remove single pages with delete_document. Only act on crawls the user asked about. Returns the action taken and the crawls still listed. Needs YACY_ADMIN_PASSWORD.",
+      inputSchema: {
+        action: z.enum(["pause", "resume", "stop"]).describe("'pause' or 'resume' the local crawler queue, or 'stop' one crawl"),
+        handle: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional().describe("for 'stop': the crawl's handle as listed by the crawls tool"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+    },
+    safely(async ({ action, handle }, extra) => {
+      if (action === "stop" && !handle) throw new Error("'stop' needs the handle of a crawl (see the crawls tool)");
+      if (action === "stop" && !(await yacy.crawls(extra.signal)).some((c) => c.handle === handle)) throw new Error(`no crawl with handle ${handle}; list them with the crawls tool`);
+      await yacy.crawlControl(action, handle, extra.signal);
+      return { action, ...(handle ? { handle } : {}), crawls: await yacy.crawls(extra.signal) };
+    }),
+  );
+
+  server.registerTool(
+    "delete_document",
+    {
+      title: "Remove a page from the index",
+      description:
+        "Remove one page (by its exact URL) from your YaCy peer's own index: its full-text entry and its word index references. Use it for pages the user wants gone, e.g. outdated or wrongly crawled ones. " +
+        "It does not remove copies other peers hold, and a running crawl of that site may fetch the page again (stop it first with crawl_control). Repeating a search you just ran may show the old results for a few minutes (YaCy keeps them); a new query shows the change. Returns YaCy's message, e.g. 'Removed URL ...'. Needs YACY_ADMIN_PASSWORD.",
+      inputSchema: { url: z.string().url().max(2000).describe("the exact URL of the indexed page, as search returns it") },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+    },
+    safely(async ({ url }, extra) => {
+      const u = new URL(url);
+      if (!["http:", "https:", "ftp:", "smb:", "file:"].includes(u.protocol)) throw new Error("not a URL YaCy indexes");
+      return { url, result: await yacy.deleteDocument(url, extra.signal) };
+    }),
+  );
+
+  server.registerTool(
     "trust_status",
     {
       title: "Trust lists held by this peer",
       description:
-        "improved-search fork only: the signed delegations and trusted peer lists this peer holds (/yacy/trust.json). Results count as verified only if their author is on one of these lists " +
-        "(or trust.signedOnly=true in a closed network).",
+        "Show which trust statements your peer holds, to explain why results are or are not 'verified' (improved-search fork only). " +
+        "Returns the envelopes of /yacy/trust.json, one per statement: type ('yacy-delegation-v1': a coordinator delegates to an operator, or revokes it; 'yacy-peerlist-v1': a signed list of trusted peers), signer (public key), version, revoked, and for lists the number of peers. " +
+        "A result counts as verified only if its author is on a list of a coordinator the peer trusts (trust.coordinators), or with trust.signedOnly=true in a closed network. An empty array means the peer trusts only its own documents. Read-only; needs no password.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },

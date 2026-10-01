@@ -183,6 +183,34 @@ export class YaCy {
     };
   }
 
+  /** crawls started by a user (YaCy's own profiles are in robot_* collections), with the handle that crawl_control needs */
+  async crawls(signal?: AbortSignal): Promise<CrawlProfile[]> {
+    return parseCrawlProfiles(await (await this.admin("/CrawlProfileEditor_p.xml", { signal })).text());
+  }
+
+  /** pause or resume the local crawler queue, or stop one crawl (removes its queued URLs; indexed pages stay) */
+  async crawlControl(action: "pause" | "resume" | "stop", handle: string | undefined, signal?: AbortSignal): Promise<void> {
+    const params =
+      action === "pause" ? new URLSearchParams({ pause: "localcrawler" })
+      : action === "resume" ? new URLSearchParams({ continue: "localcrawler" })
+      : new URLSearchParams({ terminate: "", handle: handle ?? "" });
+    const res = await this.admin(`/Crawler_p.html?${params}`, { signal });
+    await res.arrayBuffer();
+    if (!res.ok) throw new Error(`crawl ${action} failed: HTTP ${res.status}`);
+  }
+
+  /** remove one URL from this peer's index (full text and word index); returns YaCy's message */
+  async deleteDocument(url: string, signal?: AbortSignal): Promise<string> {
+    const page = await this.admin("/IndexControlURLs_p.html", { signal });
+    await page.arrayBuffer();
+    const token = page.headers.get("x-yacy-transaction-token");
+    if (!token) throw new Error("YaCy did not send a transaction token (X-YaCy-Transaction-Token); is this a YaCy peer?");
+    const res = await this.admin("/IndexControlURLs_p.html", { method: "POST", body: new URLSearchParams({ urlstring: url, urldelete: "", transactionToken: token }), signal });
+    if (!res.ok) throw new Error(`delete failed: HTTP ${res.status}`);
+    const plain = (await res.text()).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+    return plain.match(/(Removed URL [^ ]+|No input given[^.]*\.|No Entry for URL[^.]*\.)/)?.[0] ?? "YaCy did not report the result; check with search resource 'local'.";
+  }
+
   async seeds(me: boolean, signal?: AbortSignal): Promise<Record<string, string>[]> {
     return (await this.json<{ peers: Record<string, string>[] }>(me ? "/yacy/seedlist.json?my=" : "/yacy/seedlist.json?me=false", signal)).peers ?? [];
   }
@@ -216,4 +244,18 @@ export class YaCy {
 function optionValue(html: string, key: string): string | null {
   const m = html.match(new RegExp(`id="k${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" value="([^"]*)"`));
   return m ? m[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&") : null;
+}
+
+export type CrawlProfile = { handle: string; name: string; depth: number; maxPagesPerHost: number; status: string };
+
+/** the <crawlProfile> entries of CrawlProfileEditor_p.xml that a user started; YaCy's built-in profiles have robot_* collections */
+export function parseCrawlProfiles(xml: string): CrawlProfile[] {
+  const out: CrawlProfile[] = [];
+  for (const m of xml.matchAll(/<crawlProfile>([\s\S]*?)<\/crawlProfile>/g)) {
+    const tag = (t: string) => (m[1].match(new RegExp(`<${t}>([^<]*)</${t}>`))?.[1] ?? "").trim().replace(/&amp;/g, "&");
+    if (tag("collections").split(",").some((c) => c.trim().startsWith("robot_"))) continue;
+    const max = Number(tag("domMaxPages")) || 0;
+    out.push({ handle: tag("handle"), name: tag("name"), depth: Number(tag("depth")) || 0, maxPagesPerHost: max >= 2147483647 ? 0 : max, status: tag("status") || "active" });
+  }
+  return out;
 }

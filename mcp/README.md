@@ -19,7 +19,7 @@ docker run -d --name yacy --network yacy -p 127.0.0.1:8090:8090 \
 
 # Claude Code
 claude mcp add yacy -- docker run -i --rm --network yacy \
-  -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD='<your password>' ghcr.io/pad01g/yacy-search-mcp:0.2.1
+  -e YACY_URL=http://yacy:8090 -e YACY_ADMIN_PASSWORD='<your password>' ghcr.io/pad01g/yacy-search-mcp:0.3.0
 ```
 
 The fork's image starts with the administrator account `admin` / `yacy`: change the password at
@@ -32,7 +32,7 @@ Other clients (`mcp.json` style):
   "mcpServers": {
     "yacy": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "--network", "yacy", "-e", "YACY_URL=http://yacy:8090", "-e", "YACY_ADMIN_PASSWORD=<your password>", "ghcr.io/pad01g/yacy-search-mcp:0.2.1"]
+      "args": ["run", "-i", "--rm", "--network", "yacy", "-e", "YACY_URL=http://yacy:8090", "-e", "YACY_ADMIN_PASSWORD=<your password>", "ghcr.io/pad01g/yacy-search-mcp:0.3.0"]
     }
   }
 }
@@ -63,6 +63,9 @@ For a peer outside Docker use `-e YACY_URL=http://host.docker.internal:8090` (Li
 | `set_ranking_setting` | change one of them (allow-list only: minimum match, coverage and thin page weights, title phrase boost, wait time; unverified results and excluded tags only with `YACY_ALLOW_TRUST_SETTINGS=1`) |
 | `evaluate_ranking` | queries with known relevant URLs: precision@k, recall@k, R-precision, the rank of each relevant URL; finishes within about 50 s (queries that do not fit are reported as `skipped`) |
 | `trust_status` | the signed delegations and peer lists the peer holds |
+| `crawls` | the crawls started on the peer, with the handle `crawl_control` needs |
+| `crawl_control` | pause or resume the local crawler, or stop one crawl (indexed pages stay) |
+| `delete_document` | remove one page from the peer's own index (stop a running crawl of that site first) |
 
 A typical loop for improving results: `evaluate_ranking` → `set_ranking_setting` → `evaluate_ranking`.
 

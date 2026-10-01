@@ -23,7 +23,7 @@ test("all tools against a live peer", { skip: !live && "set YACY_URL (and YACY_A
       return JSON.parse(res.content[0].text);
     };
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["crawl", "evaluate_ranking", "get_ranking_settings", "index_status", "peers", "search", "set_ranking_setting", "trust_status"]);
+    assert.deepEqual(tools, ["crawl", "crawl_control", "crawls", "delete_document", "evaluate_ranking", "get_ranking_settings", "index_status", "peers", "search", "set_ranking_setting", "trust_status"]);
 
     const status = await call("index_status");
     console.log("index_status", JSON.stringify(status));
@@ -49,6 +49,22 @@ test("all tools against a live peer", { skip: !live && "set YACY_URL (and YACY_A
       const crawl = await call("crawl", { url: process.env.YACY_TEST_CRAWL, depth: 0, maxPages: 10 });
       console.log("crawl", crawl.message);
       assert.match(crawl.message, /started/);
+      const running = await call("crawls");
+      const host = new URL(process.env.YACY_TEST_CRAWL!).hostname;
+      const mine = running.find((c: { name: string }) => c.name === host);
+      assert.ok(mine, "the new crawl is listed");
+      const stopped = await call("crawl_control", { action: "stop", handle: mine.handle });
+      assert.ok(!stopped.crawls.some((c: { handle: string }) => c.handle === mine.handle), "the crawl is gone after stop");
+    }
+    console.log("crawls", (await call("crawls")).length);
+    assert.equal((await call("crawl_control", { action: "pause" })).action, "pause");
+    assert.equal((await call("crawl_control", { action: "resume" })).action, "resume");
+    const noHandle = (await client.callTool({ name: "crawl_control", arguments: { action: "stop" } })) as { isError?: boolean };
+    assert.ok(noHandle.isError, "stop without a handle is refused");
+    if (process.env.YACY_TEST_DELETE) {
+      const del = await call("delete_document", { url: process.env.YACY_TEST_DELETE });
+      console.log("delete_document", del.result);
+      assert.match(del.result, /Removed URL/);
     }
     const trust = await call("trust_status");
     console.log("trust_status", trust.length, "envelopes");

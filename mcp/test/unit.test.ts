@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkCrawlTarget, isPrivateAddress, SETTINGS, sameUrl, score, VERSION } from "../src/server.ts";
-import { clean, configFromEnv, parseChallenge } from "../src/yacy.ts";
+import { clean, configFromEnv, parseChallenge, parseCrawlProfiles } from "../src/yacy.ts";
 
 const r = (url: string) => ({ title: "", url, snippet: "", verified: null, trust: null, tags: [] });
 
@@ -67,3 +67,17 @@ test("Digest challenges are parsed quoted and unquoted; text from peers is clean
   assert.equal(clean("x".repeat(20), 5).length, 5);
   assert.match(VERSION, /^\d+\.\d+\.\d+$/);
 });
+
+test("only crawls a user started are listed", () => {
+  // shaped like CrawlProfileEditor_p.xml of a real peer
+  const xml = `<crawlProfiles>
+    <crawlProfile><handle>7pSJcqEJ2d8A</handle><name>snippetLocalText</name><collections>robot_snippetLocalText</collections><depth>0</depth><domMaxPages>2147483647</domMaxPages><status>active</status></crawlProfile>
+    <crawlProfile><handle>9jYwKtdD1F96</handle><name>gamma.lab</name><collections>user</collections><depth>1</depth><domMaxPages>20</domMaxPages><status>active</status></crawlProfile>
+    <crawlProfile><handle>q1</handle><name>a&amp;b.example</name><collections>user,docs</collections><depth>0</depth><domMaxPages>2147483647</domMaxPages><status>active</status></crawlProfile>
+  </crawlProfiles>`;
+  assert.deepEqual(parseCrawlProfiles(xml), [
+    { handle: "9jYwKtdD1F96", name: "gamma.lab", depth: 1, maxPagesPerHost: 20, status: "active" },
+    { handle: "q1", name: "a&b.example", depth: 0, maxPagesPerHost: 0, status: "active" },
+  ]);
+});
+

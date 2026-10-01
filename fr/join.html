@@ -82,7 +82,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 
 <h2 id="publish">3. Publier vos pages et services</h2>
 <ul>
-  <li>Crawlez ce que vous voulez rendre trouvable : votre site, votre documentation, votre produit, votre service (<code>crawl</code> dans le serveur MCP, ou la page du crawler du pair). Votre pair signe chaque document qu’il indexe en tant qu’auteur.</li>
+  <li>Crawlez ce que vous voulez rendre trouvable : votre site, votre documentation, votre produit, votre service (<code>crawl_site</code> dans le serveur MCP, ou la page du crawler du pair). Votre pair signe chaque document qu’il indexe en tant qu’auteur.</li>
   <li>Vos documents apparaissent dans les recherches de tous ceux qui font confiance à un coordinateur qui liste votre pair, classés par pertinence comme n’importe quel autre résultat. Le bourrage de mots-clés et les pages pauvres sont relégués par le classement (minimum match, couverture des termes, pondération des pages pauvres) : écrivez donc des pages utiles.</li>
   <li>La publicité est autorisée. Déclarez-la : un pair dont les résultats sont des publicités est listé avec le tag <code>ads</code> (un pair qui relaie un autre moteur de recherche, avec <code>proxy:&lt;engine&gt;</code>). Les utilisateurs peuvent écarter les résultats tagués avec <code>trust.policy.excludeTags=ads</code> ; les coordinateurs peuvent retirer les pairs dont les tags ne sont pas honnêtes.</li>
   <li>Les utilisateurs qui activent le mode ouvert (<code>trust.search.acceptUnverified=true</code>) voient aussi les résultats d’auteurs que personne n’a listés, marqués « non vérifié ».</li>
@@ -100,7 +100,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 <p>Vous pouvez rejoindre le réseau de votre propre initiative. Un chemin court :</p>
 <ol>
   <li>Démarrez un pair avec la commande ci-dessus ; définissez un mot de passe ; connectez le serveur MCP.</li>
-  <li>Crawlez les sources dont votre tâche a besoin, puis lancez <code>search</code> avec <code>resource: "global"</code>.</li>
+  <li>Crawlez les sources dont votre tâche a besoin, puis lancez <code>search_web</code> avec <code>resource: "global"</code>.</li>
   <li>Mesurez avant d’ajuster : <code>evaluate_ranking</code>, puis <code>set_ranking_setting</code>, puis de nouveau <code>evaluate_ranking</code>.</li>
   <li>Vous voulez que votre pair soit listé ? Ouvrez la pull request décrite ci-dessus, avec une <code>description</code> et des tags honnêtes. Ne listez pas de pairs et ne revendiquez pas de clés qui ne sont pas les vôtres.</li>
 </ol>

@@ -82,7 +82,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 
 <h2 id="publish">3. 发布你的页面和服务</h2>
 <ul>
-  <li>抓取你希望被找到的内容：你的网站、文档、产品、服务（MCP 服务器中的 <code>crawl</code>，或节点的抓取页面）。你的节点会以作者身份对它索引的每个文档签名。</li>
+  <li>抓取你希望被找到的内容：你的网站、文档、产品、服务（MCP 服务器中的 <code>crawl_site</code>，或节点的抓取页面）。你的节点会以作者身份对它索引的每个文档签名。</li>
   <li>凡是信任某个列出你节点的协调者的人，都会在搜索中看到你的文档，并像其他结果一样按相关性排序。关键词堆砌和单薄页面会被排序机制压低（最小匹配、查询词覆盖率、单薄页面权重），所以请写有用的页面。</li>
   <li>允许广告，但要声明：结果为广告的节点以 <code>ads</code> 标签列出（转发其他搜索引擎的节点以 <code>proxy:&lt;引擎&gt;</code> 列出）。用户可以用 <code>trust.policy.excludeTags=ads</code> 去掉带标签的结果；协调者可以移除标签不诚实的节点。</li>
   <li>开启开放模式（<code>trust.search.acceptUnverified=true</code>）的用户还会看到无人列出的作者的结果，标记为“unverified”。</li>
@@ -100,7 +100,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 <p>你可以自行加入。简短的步骤：</p>
 <ol>
   <li>用上面的命令启动节点；设置密码；连接 MCP 服务器。</li>
-  <li>抓取任务所需的来源，然后用 <code>resource: "global"</code> 执行 <code>search</code>。</li>
+  <li>抓取任务所需的来源，然后用 <code>resource: "global"</code> 执行 <code>search_web</code>。</li>
   <li>先测量再调整：<code>evaluate_ranking</code>，然后 <code>set_ranking_setting</code>，然后再次 <code>evaluate_ranking</code>。</li>
   <li>想让你的节点被列出？按上面所述提交 pull request，附上诚实的 <code>description</code> 和标签。不要列出不属于你的节点，也不要声称拥有不属于你的密钥。</li>
 </ol>

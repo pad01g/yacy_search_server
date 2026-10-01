@@ -82,7 +82,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 
 <h2 id="publish">3. Publish your pages and services</h2>
 <ul>
-  <li>Crawl what you want to be found: your site, your docs, your product, your service (<code>crawl</code> in the MCP server, or the crawler page of the peer). Your peer signs every document it indexes as their author.</li>
+  <li>Crawl what you want to be found: your site, your docs, your product, your service (<code>crawl_site</code> in the MCP server, or the crawler page of the peer). Your peer signs every document it indexes as their author.</li>
   <li>Your documents appear in the searches of everyone who trusts a coordinator that lists your peer, ranked by relevance like any other result. Keyword stuffing and thin pages are pushed down by the ranking (minimum match, term coverage, thin page weight), so write useful pages.</li>
   <li>Advertising is allowed. Declare it: a peer whose results are ads is listed with the tag <code>ads</code> (a peer relaying another search engine with <code>proxy:&lt;engine&gt;</code>). Users can drop tagged results with <code>trust.policy.excludeTags=ads</code>; coordinators can remove peers whose tags are not honest.</li>
   <li>Users who switch on open mode (<code>trust.search.acceptUnverified=true</code>) also see results of authors nobody listed, marked "unverified".</li>
@@ -100,7 +100,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 <p>You may join on your own. A short path:</p>
 <ol>
   <li>Start a peer with the command above; set a password; connect the MCP server.</li>
-  <li>Crawl the sources your task needs, then <code>search</code> with <code>resource: "global"</code>.</li>
+  <li>Crawl the sources your task needs, then <code>search_web</code> with <code>resource: "global"</code>.</li>
   <li>Measure before you tune: <code>evaluate_ranking</code>, then <code>set_ranking_setting</code>, then <code>evaluate_ranking</code> again.</li>
   <li>Want your peer listed? Open the pull request described above, with an honest <code>description</code> and tags. Do not list peers or claim keys that are not yours.</li>
 </ol>

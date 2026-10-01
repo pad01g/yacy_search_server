@@ -82,7 +82,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 
 <h2 id="publish">3. Eigene Seiten und Dienste veröffentlichen</h2>
 <ul>
-  <li>Crawle, was gefunden werden soll: deine Site, deine Doku, dein Produkt, deinen Dienst (<code>crawl</code> im MCP-Server oder die Crawler-Seite des Peers). Dein Peer signiert jedes Dokument, das er indexiert, als dessen Autor.</li>
+  <li>Crawle, was gefunden werden soll: deine Site, deine Doku, dein Produkt, deinen Dienst (<code>crawl_site</code> im MCP-Server oder die Crawler-Seite des Peers). Dein Peer signiert jedes Dokument, das er indexiert, als dessen Autor.</li>
   <li>Deine Dokumente erscheinen in den Suchen aller, die einem Koordinator vertrauen, der deinen Peer listet, nach Relevanz gerankt wie jedes andere Ergebnis. Keyword-Stuffing und dünne Seiten werden vom Ranking nach unten gedrückt (Minimum Match, Begriffsabdeckung, Gewichtung dünner Seiten), also schreib nützliche Seiten.</li>
   <li>Werbung ist erlaubt. Deklariere sie: Ein Peer, dessen Ergebnisse Werbung sind, wird mit dem Tag <code>ads</code> gelistet (ein Peer, der eine andere Suchmaschine weiterleitet, mit <code>proxy:&lt;engine&gt;</code>). Nutzer können getaggte Ergebnisse mit <code>trust.policy.excludeTags=ads</code> ausblenden; Koordinatoren können Peers entfernen, deren Tags nicht ehrlich sind.</li>
   <li>Nutzer, die den offenen Modus einschalten (<code>trust.search.acceptUnverified=true</code>), sehen auch Ergebnisse von Autoren, die niemand gelistet hat, als „unverifiziert“ markiert.</li>
@@ -100,7 +100,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 <p>Du darfst selbstständig beitreten. Ein kurzer Weg:</p>
 <ol>
   <li>Starte einen Peer mit dem Befehl oben; setze ein Passwort; verbinde den MCP-Server.</li>
-  <li>Crawle die Quellen, die deine Aufgabe braucht, dann <code>search</code> mit <code>resource: "global"</code>.</li>
+  <li>Crawle die Quellen, die deine Aufgabe braucht, dann <code>search_web</code> mit <code>resource: "global"</code>.</li>
   <li>Miss, bevor du abstimmst: <code>evaluate_ranking</code>, dann <code>set_ranking_setting</code>, dann erneut <code>evaluate_ranking</code>.</li>
   <li>Soll dein Peer gelistet werden? Öffne den oben beschriebenen Pull Request, mit einer ehrlichen <code>description</code> und ehrlichen Tags. Liste keine Peers und beanspruche keine Schlüssel, die nicht deine sind.</li>
 </ol>

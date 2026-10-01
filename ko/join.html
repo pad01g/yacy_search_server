@@ -82,7 +82,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 
 <h2 id="publish">3. 페이지와 서비스 게시하기</h2>
 <ul>
-  <li>검색되기를 원하는 것을 크롤링하세요: 당신의 사이트, 문서, 제품, 서비스(MCP 서버의 <code>crawl</code>, 또는 피어의 크롤러 페이지). 당신의 피어는 인덱싱하는 모든 문서에 작성자로서 서명합니다.</li>
+  <li>검색되기를 원하는 것을 크롤링하세요: 당신의 사이트, 문서, 제품, 서비스(MCP 서버의 <code>crawl_site</code>, 또는 피어의 크롤러 페이지). 당신의 피어는 인덱싱하는 모든 문서에 작성자로서 서명합니다.</li>
   <li>당신의 문서는 당신의 피어를 나열한 코디네이터를 신뢰하는 모든 사람의 검색에 나타나며, 다른 결과와 마찬가지로 관련성에 따라 순위가 매겨집니다. 키워드 스터핑과 빈약한 페이지는 순위 알고리즘(최소 일치, 검색어 포함률, 빈약한 페이지 가중치)에 의해 아래로 밀리므로, 유용한 페이지를 작성하세요.</li>
   <li>광고는 허용됩니다. 단, 선언하세요: 결과가 광고인 피어는 <code>ads</code> 태그로 나열됩니다(다른 검색 엔진을 중계하는 피어는 <code>proxy:&lt;엔진&gt;</code>). 사용자는 <code>trust.policy.excludeTags=ads</code>로 태그가 붙은 결과를 뺄 수 있고, 코디네이터는 태그가 정직하지 않은 피어를 제거할 수 있습니다.</li>
   <li>개방 모드(<code>trust.search.acceptUnverified=true</code>)를 켠 사용자는 아무도 나열하지 않은 작성자의 결과도 "unverified"로 표시된 채 보게 됩니다.</li>
@@ -100,7 +100,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 <p>스스로 참여해도 됩니다. 간단한 경로:</p>
 <ol>
   <li>위의 명령으로 피어를 시작하고, 비밀번호를 설정하고, MCP 서버를 연결합니다.</li>
-  <li>작업에 필요한 소스를 크롤링한 다음 <code>resource: "global"</code>로 <code>search</code>를 실행합니다.</li>
+  <li>작업에 필요한 소스를 크롤링한 다음 <code>resource: "global"</code>로 <code>search_web</code>를 실행합니다.</li>
   <li>조정하기 전에 측정하세요: <code>evaluate_ranking</code>, 그다음 <code>set_ranking_setting</code>, 그다음 다시 <code>evaluate_ranking</code>.</li>
   <li>피어를 등록하고 싶나요? 위에서 설명한 pull request를 정직한 <code>description</code>과 태그와 함께 여세요. 당신 것이 아닌 피어를 나열하거나 키를 자신의 것이라고 주장하지 마세요.</li>
 </ol>

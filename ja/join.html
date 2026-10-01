@@ -82,7 +82,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 
 <h2 id="publish">3. 自分の頁やサービスを出す</h2>
 <ul>
-  <li>見つけてほしいものを crawl する。自分のサイト、ドキュメント、製品、サービスなど（MCP サーバーの <code>crawl</code>、またはピアの crawl の画面）。ピアは索引した文書すべてに、作者として署名する。</li>
+  <li>見つけてほしいものを crawl する。自分のサイト、ドキュメント、製品、サービスなど（MCP サーバーの <code>crawl_site</code>、またはピアの crawl の画面）。ピアは索引した文書すべてに、作者として署名する。</li>
   <li>あなたの文書は、あなたのピアを載せたコーディネータを信頼する全員の検索に、ほかの結果と同じく関連度の順で出る。キーワードの詰め込みや中身の薄い頁は順位の仕組み（最小一致、語の被覆率、薄い頁の重み）で下がるので、役に立つ頁を書く。</li>
   <li>広告も出してよい。ただし宣言する: 広告を返すピアはタグ <code>ads</code> 付きで載せる（他の検索エンジンを中継するピアは <code>proxy:&lt;エンジン&gt;</code>）。利用者は <code>trust.policy.excludeTags=ads</code> で外せる。タグが正直でないピアは、コーディネータが一覧から外せる。</li>
   <li>開放モード（<code>trust.search.acceptUnverified=true</code>）にした利用者には、誰も載せていない作者の結果も「未検証」として出る。</li>
@@ -100,7 +100,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 <p>自分の判断で参加してかまいません。短い手順:</p>
 <ol>
   <li>上のコマンドでピアを立て、パスワードを設定し、MCP サーバーをつなぐ。</li>
-  <li>タスクに要る情報源を crawl し、<code>resource: "global"</code> で <code>search</code> する。</li>
+  <li>タスクに要る情報源を crawl し、<code>resource: "global"</code> で <code>search_web</code> する。</li>
   <li>調整する前に測る: <code>evaluate_ranking</code>、<code>set_ranking_setting</code>、もう一度 <code>evaluate_ranking</code>。</li>
   <li>自分のピアを載せたいなら、上の pull request を、正直な <code>description</code> とタグで出す。自分のものでないピアや鍵を載せない。</li>
 </ol>

@@ -82,7 +82,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 
 <h2 id="publish">3. Publica tus páginas y servicios</h2>
 <ul>
-  <li>Rastrea lo que quieres que se encuentre: tu sitio, tu documentación, tu producto, tu servicio (<code>crawl</code> en el servidor MCP, o la página del crawler del peer). Tu peer firma como autor cada documento que indexa.</li>
+  <li>Rastrea lo que quieres que se encuentre: tu sitio, tu documentación, tu producto, tu servicio (<code>crawl_site</code> en el servidor MCP, o la página del crawler del peer). Tu peer firma como autor cada documento que indexa.</li>
   <li>Tus documentos aparecen en las búsquedas de todos los que confían en un coordinador que lista tu peer, ordenados por relevancia como cualquier otro resultado. El ranking relega el keyword stuffing y las páginas escasas (coincidencia mínima, cobertura de términos, peso de páginas escasas), así que escribe páginas útiles.</li>
   <li>La publicidad está permitida. Decláralo: un peer cuyos resultados son anuncios se lista con la etiqueta <code>ads</code> (un peer que hace de relay de otro buscador, con <code>proxy:&lt;engine&gt;</code>). Los usuarios pueden descartar los resultados etiquetados con <code>trust.policy.excludeTags=ads</code>; los coordinadores pueden eliminar peers cuyas etiquetas no sean honestas.</li>
   <li>Los usuarios que activan el modo abierto (<code>trust.search.acceptUnverified=true</code>) también ven resultados de autores que nadie ha listado, marcados como "no verificados".</li>
@@ -100,7 +100,7 @@ docker run -d --name yacy --network yacy -p 8090:8090 \
 <p>Puedes unirte por tu cuenta. Un camino corto:</p>
 <ol>
   <li>Inicia un peer con el comando de arriba; establece una contraseña; conecta el servidor MCP.</li>
-  <li>Rastrea las fuentes que necesita tu tarea y luego usa <code>search</code> con <code>resource: "global"</code>.</li>
+  <li>Rastrea las fuentes que necesita tu tarea y luego usa <code>search_web</code> con <code>resource: "global"</code>.</li>
   <li>Mide antes de ajustar: <code>evaluate_ranking</code>, luego <code>set_ranking_setting</code>, luego <code>evaluate_ranking</code> otra vez.</li>
   <li>¿Quieres que tu peer esté listado? Abre el pull request descrito arriba, con una <code>description</code> y etiquetas honestas. No listes peers ni reclames claves que no sean tuyos.</li>
 </ol>

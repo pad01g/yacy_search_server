@@ -115,7 +115,7 @@ const T = {
     newPeer: "new (it has no public address yet, so it has not joined a network)",
     fName: "Peer", fType: "Type", fDocs: "Documents in its index", fPeers: "Peers it knows", fSigned: "Signed seed",
     yes: "yes", no: "no",
-    emptyIndex: "The index of this peer is empty and it knows no other peers, so searches return nothing yet. Crawl a site first: <a id='crawlLink' target='_blank' rel='noopener'>open the crawler of your peer</a> (log in as admin), or use the MCP tool <code>crawl</code>.",
+    emptyIndex: "The index of this peer is empty and it knows no other peers, so searches return nothing yet. Crawl a site first: <a id='crawlLink' target='_blank' rel='noopener'>open the crawler of your peer</a> (log in as admin), or use the MCP tool <code>crawl_site</code>.",
     troubleTitle: "If it does not connect",
     trouble: [
       "Is the peer running and ready? <code>curl -s 'http://localhost:8090/yacy/seedlist.json?my='</code> must print JSON (it takes a minute after start).",
@@ -144,7 +144,7 @@ const T = {
     newPeer: "新しいピア（まだ公開アドレスが無く、網に参加していない）",
     fName: "ピア", fType: "種別", fDocs: "索引の文書数", fPeers: "知っているピア", fSigned: "署名付きの seed",
     yes: "あり", no: "なし",
-    emptyIndex: "このピアの索引は空で、他のピアも知らないので、まだ何も見つかりません。まず crawl する: <a id='crawlLink' target='_blank' rel='noopener'>ピアの crawl の画面を開く</a>（admin でログイン）か、MCP の <code>crawl</code> を使う。",
+    emptyIndex: "このピアの索引は空で、他のピアも知らないので、まだ何も見つかりません。まず crawl する: <a id='crawlLink' target='_blank' rel='noopener'>ピアの crawl の画面を開く</a>（admin でログイン）か、MCP の <code>crawl_site</code> を使う。",
     troubleTitle: "つながらないとき",
     trouble: [
       "ピアは起動して準備ができているか。<code>curl -s 'http://localhost:8090/yacy/seedlist.json?my='</code> が JSON を返すこと（起動から 1 分ほどかかる）。",

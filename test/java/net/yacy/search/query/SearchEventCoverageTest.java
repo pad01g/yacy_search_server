@@ -96,4 +96,13 @@ public class SearchEventCoverageTest {
         assertTrue(SearchEvent.thinRanking(Long.MAX_VALUE, 40, 100, 1.0d) > 0);
         assertTrue(SearchEvent.thinRanking(Long.MIN_VALUE, 40, 100, 1.0d) < 0);
     }
+
+    @Test
+    public void testWordIndexBandFollowsSolrResults() {
+        // a weak Solr result (even a negative one) ranks before the best word index result, the order inside stays
+        assertTrue(SearchEvent.wordIndexBand(5_000_000L) < -1L);
+        assertTrue(SearchEvent.wordIndexBand(1_000_000L) < SearchEvent.wordIndexBand(5_000_000L));
+        assertTrue(SearchEvent.thinRanking(SearchEvent.wordIndexBand(5_000_000L), 10, 100, 1.0d) < -1000L);
+        assertTrue(SearchEvent.trustRanking(SearchEvent.wordIndexBand(5_000_000L), null) < SearchEvent.trustRanking(-1000L, null));
+    }
 }

@@ -140,4 +140,58 @@ public class VectorSearchTest {
         assertEquals("*:* AND -embedding_model_s:\"intfloat/multilingual-e5-small\"", VectorIndexer.pendingQuery("intfloat/multilingual-e5-small"));
         assertEquals("*:* AND -embedding_model_s:\"a\\\"b\"", VectorIndexer.pendingQuery("a\"b"));
     }
+
+    @Test
+    public void testSkipFilter() {
+        assertEquals(null, VectorIndexer.skipFilter(java.util.List.of()));
+        assertEquals("*:* AND NOT _query_:\"{!terms f=id}abc-_1,XYZ\"", VectorIndexer.skipFilter(java.util.List.of("abc-_1", "XYZ")));
+    }
+
+    @Test
+    public void testSectionsFollowTheStartAndTheHeadings() {
+        final StringBuilder text = new StringBuilder();
+        for (int i = 0; i < 20; i++) text.append("start of the page ");
+        text.append("\n## First section\n");
+        for (int i = 0; i < 30; i++) text.append("first words ");
+        text.append("\n## Second section\n");
+        for (int i = 0; i < 30; i++) text.append("second words ");
+        text.append("\n## Third section\n");
+        for (int i = 0; i < 30; i++) text.append("third words ");
+        final java.util.List<String> s = VectorSearch.sections("Title", text.toString(), 300, 2);
+        assertEquals(2, s.size());
+        assertTrue(s.get(0), s.get(0).startsWith("Title\n## First section first words"));
+        assertTrue(s.get(0).length() <= 300);
+        assertTrue(s.get(1), s.get(1).startsWith("Title\n## Second section"));
+        // a short page has no sections, and none are asked for
+        assertEquals(0, VectorSearch.sections("Title", "short", 300, 2).size());
+        assertEquals(0, VectorSearch.sections("Title", text.toString(), 300, 0).size());
+    }
+
+    @Test
+    public void testBestOfKeepsTheBestSimilarityPerPage() {
+        final SolrDocumentList start = scored(3, "a", 0.80f, "b", 0.75f);
+        final SolrDocumentList section = scored(3, "b", 0.90f, "c", 0.70f);
+        final SolrDocumentList best = VectorSearch.bestOf(java.util.List.of(start, section), 2);
+        assertArrayEquals(new String[] {"b", "a"}, ids(best));
+        assertEquals(0.90f, (Float) best.get(0).getFieldValue("score"), 1e-6f);
+    }
+
+    @Test
+    public void testAbsoluteFusionGivesPoorMatchesNothing() {
+        // knn scores are (1 + cosine) / 2: 0.95 is cosine 0.90, 0.90 is cosine 0.80
+        final SolrDocumentList keyword = scored(10, "k1", 10f, "k2", 5f);
+        final SolrDocumentList poor = scored(50, "p1", 0.90f, "p2", 0.89f);
+        final SolrDocumentList fusedPoor = VectorSearch.fuseScoresAbsolute(keyword, poor, 1.0f, 10, 0.80, 0.90);
+        // a list of poor matches: the best of them gets nothing and stays behind the keyword results
+        assertArrayEquals(new String[] {"k1", "k2", "p1", "p2"}, ids(fusedPoor));
+        // min-max scaling would give the best poor match the full weight, in front of k2
+        assertEquals("p1", VectorSearch.fuseScores(keyword, poor, 1.0f, 10).get(1).getFieldValue("id"));
+        // a strong match the keyword query missed: the full weight (1.5) puts it before the best keyword match (1.0)
+        final SolrDocumentList strong = scored(50, "s1", 0.95f);
+        assertEquals("s1", VectorSearch.fuseScoresAbsolute(keyword, strong, 1.5f, 10, 0.80, 0.90).get(0).getFieldValue("id"));
+        // a page in both lists adds both parts: k2 (0.5 + 1.5 * 0.6) before k1 (1.0)
+        final SolrDocumentList both = scored(50, "k2", 0.93f);
+        assertEquals("k2", VectorSearch.fuseScoresAbsolute(keyword, both, 1.5f, 10, 0.80, 0.90).get(0).getFieldValue("id"));
+        assertEquals(0.90, VectorSearch.cosine(0.95), 1e-9);
+    }
 }

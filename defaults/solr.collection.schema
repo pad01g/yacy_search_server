@@ -294,6 +294,9 @@ h6_txt
 ## internal links, the visible anchor text
 inboundlinks_anchortext_txt
 
+## the anchor texts of the links from other pages of the index to this page (written by the AnchorIndexer), text
+anchors_in_txt
+
 ## external links, the visible anchor text
 outboundlinks_anchortext_txt
 

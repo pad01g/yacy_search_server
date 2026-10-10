@@ -133,6 +133,7 @@ import net.yacy.repository.Blacklist.BlacklistType;
 import net.yacy.search.EventTracker;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
+import net.yacy.search.ranking.VersionCollapse;
 import net.yacy.search.vector.VectorSearch;
 import net.yacy.search.index.Segment;
 import net.yacy.search.query.SearchEvent;
@@ -1371,6 +1372,8 @@ public final class Protocol {
                     if (!sc.isClosed()) {
                         rsp[0] = sc.getResponseByParams(solrQuery);
                         docList[0] = rsp[0].getResults();
+                        VersionCollapse.enabled = Switchboard.getSwitchboard().getConfigBool(SwitchboardConstants.SEARCH_RANKING_COLLAPSE_VERSIONS, true);
+                        if (VersionCollapse.enabled) docList[0] = VersionCollapse.collapse(docList[0], Integer.MAX_VALUE);
                         // vector search: merge the documents nearest to the query (also those the keyword query missed)
                         if (offset == 0 && VectorSearch.enabled() && !event.query.servesRemotePeer()) {
                             final float[] v = VectorSearch.queryVector(event.query.getQueryGoal().getQueryString(false));
@@ -1378,7 +1381,17 @@ public final class Protocol {
                                 final Switchboard sb = Switchboard.getSwitchboard();
                                 final int topK = Math.max(count, sb.getConfigInt(SwitchboardConstants.SEARCH_VECTOR_TOPK, SwitchboardConstants.SEARCH_VECTOR_TOPK_DEFAULT));
                                 try {
-                                    final SolrDocumentList nearest = sc.getResponseByParams(VectorSearch.knnQuery(solrQuery, v, topK)).getResults();
+                                    SolrDocumentList nearest = sc.getResponseByParams(VectorSearch.knnQuery(solrQuery, v, topK)).getResults();
+                                    final int sections = sb.getConfigBool(SwitchboardConstants.SEARCH_VECTOR_SECTIONS_SEARCH, true) ? VectorSearch.sections() : 0;
+                                    if (sections > 0) {
+                                        // long pages also have embeddings of later sections: a page counts with its best one
+                                        final List<SolrDocumentList> lists = new ArrayList<>(sections + 1);
+                                        lists.add(nearest);
+                                        for (int s = 0; s < sections; s++) {
+                                            lists.add(sc.getResponseByParams(VectorSearch.knnQuery(solrQuery, v, topK, VectorSearch.FIELD_SECTION_VECTORS[s])).getResults());
+                                        }
+                                        nearest = VectorSearch.bestOf(lists, topK);
+                                    }
                                     docList[0] = VectorSearch.fuse(sb.getConfig(SwitchboardConstants.SEARCH_VECTOR_FUSION, "score"), docList[0], nearest,
                                             sb.getConfigFloat(SwitchboardConstants.SEARCH_VECTOR_WEIGHT, SwitchboardConstants.SEARCH_VECTOR_WEIGHT_DEFAULT), count);
                                 } catch (final Throwable e) {

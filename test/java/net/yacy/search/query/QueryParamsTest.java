@@ -312,4 +312,12 @@ public class QueryParamsTest {
 		Assert.assertEquals("bar foo", QueryParams.phraseForBoost("bar foo\\"));
 		Assert.assertEquals("c: temp dir", QueryParams.phraseForBoost("c:\\temp dir\\"));
 	}
+
+	@Test
+	public void testLanguageBoost() {
+		Assert.assertEquals("if(exists(language_s),if(termfreq(language_s,'ja'),1,0.5),1)", QueryParams.languageBoost("ja", 0.5f));
+		Assert.assertNull(QueryParams.languageBoost(null, 0.5f));
+		Assert.assertNull(QueryParams.languageBoost("ja", 1.0f)); // no penalty: nothing to do
+		Assert.assertNull(QueryParams.languageBoost("ja') OR (", 0.5f)); // never more than a language code
+	}
 }

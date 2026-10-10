@@ -723,6 +723,8 @@ public final class SwitchboardConstants {
     public static final String SEARCH_RANKING_COVERAGE_EXPONENT = "search.ranking.coverage.exponent";
     /** boost (edismax bq) of the whole query as a phrase in the title; 0 switches it off */
     public static final String SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST = "search.ranking.solr.titlePhraseBoost";
+    /** boost (edismax bq) of the whole query as a phrase in the text; 0 switches it off */
+    public static final String SEARCH_RANKING_SOLR_TEXT_PHRASE_BOOST = "search.ranking.solr.textPhraseBoost";
     /**
      * Thin content: results with fewer words than this are weighted by (words / this value) ^ exponent, at least
      * {@link #SEARCH_RANKING_THIN_FLOOR}. Pages that repeat the query in the title but have little text (tag lists,
@@ -734,6 +736,7 @@ public final class SwitchboardConstants {
     public static final float SEARCH_RANKING_THIN_EXPONENT_DEFAULT = 1.0f;
     public static final double SEARCH_RANKING_THIN_FLOOR = 0.1d;
     public static final float SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT = 20f;
+    public static final float SEARCH_RANKING_SOLR_TEXT_PHRASE_BOOST_DEFAULT = 2f;
     public static final int SEARCH_RANKING_COVERAGE_EXPONENT_DEFAULT = 2;
 
     /**
@@ -753,6 +756,34 @@ public final class SwitchboardConstants {
     public static final String SEARCH_VECTOR_WEIGHT = "search.vector.weight";
     public static final float SEARCH_VECTOR_WEIGHT_DEFAULT = 1.0f;
     public static final String SEARCH_VECTOR_FUSION = "search.vector.fusion";
+    /** fusion "abs": the cosine similarity that adds nothing (low) and the full weight (high) */
+    public static final String SEARCH_VECTOR_SIM_LOW = "search.vector.simLow";
+    public static final float SEARCH_VECTOR_SIM_LOW_DEFAULT = 0.80f;
+    public static final String SEARCH_VECTOR_SIM_HIGH = "search.vector.simHigh";
+    public static final float SEARCH_VECTOR_SIM_HIGH_DEFAULT = 0.90f;
+    /** embeddings of later sections of long pages besides the start (0..3); changing it embeds all documents again */
+    public static final String SEARCH_VECTOR_SECTIONS = "search.vector.sections";
+    public static final int SEARCH_VECTOR_SECTIONS_DEFAULT = 0;
+    /** search the section embeddings (false: only the start of the pages, without embedding anything again) */
+    public static final String SEARCH_VECTOR_SECTIONS_SEARCH = "search.vector.sections.search";
+
+    /**
+     * what the language chosen in the search form (lr, or the saved cookie) does: "prefer" ranks pages in other
+     * languages lower (by search.language.otherWeight), "filter" leaves them out. The /language/xx modifier in the
+     * query always filters.
+     */
+    public static final String SEARCH_LANGUAGE_MODE = "search.language.mode";
+    /** keep one of the copies of a page for other versions (/v19.03/x, /docs/17/x) in the local results */
+    public static final String SEARCH_RANKING_COLLAPSE_VERSIONS = "search.ranking.collapseVersions";
+    /** the pages the administrator opened for a query rank up to this much higher in later local searches; 0: off */
+    public static final String SEARCH_RANKING_CLICKS_WEIGHT = "search.ranking.clicks.weight";
+    public static final float SEARCH_RANKING_CLICKS_WEIGHT_DEFAULT = 0.5f;
+    /** collect the anchor texts of incoming links into anchors_in_txt (AnchorIndexer) */
+    public static final String SEARCH_RANKING_ANCHORS_ENABLED = "search.ranking.anchors.enabled";
+    public static final String SEARCH_RANKING_ANCHORS_REFRESH_HOURS = "search.ranking.anchors.refreshHours";
+    public static final String SEARCH_LANGUAGE_MODE_DEFAULT = "prefer";
+    public static final String SEARCH_LANGUAGE_OTHER_WEIGHT = "search.language.otherWeight";
+    public static final float SEARCH_LANGUAGE_OTHER_WEIGHT_DEFAULT = 0.5f;
 
     /**
      * minimum age in days of a peer to be asked in a remote DHT (RWI) search. Upstream hard-codes 3, which means that

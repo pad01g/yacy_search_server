@@ -214,6 +214,10 @@ public final class QueryParams {
     public final String clienthost; // this is the client host that starts the query, not a site operator
     protected final Set<String> siteexcludes; // set of domain hashes that are excluded if not included by sitehash
     public final QueryModifier modifier;
+    /** the language chosen in the search form when it is a preference, not a filter; null: none */
+    private String preferLanguage = null;
+    /** the weight of results in other languages, see {@link SwitchboardConstants#SEARCH_LANGUAGE_OTHER_WEIGHT} */
+    private float otherLanguageWeight = 1.0f;
     public Seed remotepeer;
     public final long starttime; // the time when the query started, how long it should take and the time when the timeout is reached (milliseconds)
     protected final long maxtime;
@@ -639,6 +643,35 @@ public final class QueryParams {
     }
     
     /**
+     * Rank pages in other languages lower instead of leaving them out.
+     * @param language an ISO 639-1 code
+     * @param otherWeight the weight of pages in another language (0..1); pages without a known language keep 1
+     */
+    public void preferLanguage(final String language, final float otherWeight) {
+        if (language == null || !language.matches("[a-z]{2,3}")) return;
+        this.preferLanguage = language;
+        this.otherLanguageWeight = Math.max(0f, Math.min(1f, otherWeight));
+        this.cachedQuery = null;
+    }
+
+    public String preferLanguage() {
+        return this.preferLanguage;
+    }
+
+    /** @return the weight of a result in this language: 1 for the preferred or an unknown language */
+    public double languageWeight(final String language) {
+        if (this.preferLanguage == null || this.modifier.language != null || language == null || language.isEmpty()) return 1.0d;
+        return this.preferLanguage.equals(language) ? 1.0d : this.otherLanguageWeight;
+    }
+
+    /** @return the Solr boost function for a preferred language, null if there is none */
+    static String languageBoost(final String language, final float otherWeight) {
+        if (language == null || !language.matches("[a-z]{2,3}") || otherWeight >= 1f) return null;
+        final String f = CollectionSchema.language_s.getSolrFieldName();
+        return "if(exists(" + f + "),if(termfreq(" + f + ",'" + language + "'),1," + otherWeight + "),1)";
+    }
+
+    /**
      * @param getFacets when true, generate facets for fiels given in this.facetfields
      * @param filterQueries a mutable list of filter queries, initialized with filters related to content domain. Must not be null.
      * @return a Solr query instance ready to use
@@ -671,10 +704,10 @@ public final class QueryParams {
             // the whole request, here and on the remote peers that receive the query.
             final String phrase = phraseForBoost(this.queryGoal.getIncludeString());
             if (!phrase.isEmpty()) {
-                if (bq.length() > 0) bq += "\n";
-                bq += CollectionSchema.text_t.getSolrFieldName() + ":\"" + phrase + "\"^10";
+                final String textBoost = phraseBoost(SwitchboardConstants.SEARCH_RANKING_SOLR_TEXT_PHRASE_BOOST, SwitchboardConstants.SEARCH_RANKING_SOLR_TEXT_PHRASE_BOOST_DEFAULT);
+                if (textBoost != null) bq += (bq.length() > 0 ? "\n" : "") + CollectionSchema.text_t.getSolrFieldName() + ":\"" + phrase + "\"^" + textBoost;
                 final String titleBoost = titlePhraseBoost();
-                if (titleBoost != null) bq += "\n" + CollectionSchema.title.getSolrFieldName() + ":\"" + phrase + "\"^" + titleBoost;
+                if (titleBoost != null) bq += (bq.length() > 0 ? "\n" : "") + CollectionSchema.title.getSolrFieldName() + ":\"" + phrase + "\"^" + titleBoost;
             }
         }
         if (fq.length() > 0) {
@@ -686,6 +719,10 @@ public final class QueryParams {
         }
         if (bq.length() > 0) params.setParam(DisMaxParams.BQ, bq.split("[\\r\\n]+")); // split on any sequence consisting of CR and/or LF
         if (bf.length() > 0) params.setParam("boost", bf); // a boost function extension, see http://wiki.apache.org/solr/ExtendedDisMax#bf_.28Boost_Function.2C_additive.29
+        // a preferred language: multiply the score of pages in other languages, so that they still come after
+        // the pages in the chosen language that match as well (several boost functions are multiplied)
+        final String languageBoost = languageBoost(this.preferLanguage, this.otherLanguageWeight);
+        if (languageBoost != null && this.modifier.language == null) params.add("boost", languageBoost);
         
         // set highlighting query attributes
         if (!this.snippetFetchFullText && (this.contentdom == Classification.ContentDomain.TEXT || this.contentdom == Classification.ContentDomain.ALL)) {
@@ -780,9 +817,13 @@ public final class QueryParams {
 
     /** @return the boost of the whole query as a phrase in the title, or null if it is switched off */
     static String titlePhraseBoost() {
+        return phraseBoost(SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST, SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT);
+    }
+
+    /** @return the configured boost as Solr reads it, null if it is switched off (0) */
+    static String phraseBoost(final String key, final float dflt) {
         final Switchboard sb = Switchboard.getSwitchboard();
-        final float b = sb == null ? SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT
-                : sb.getConfigFloat(SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST, SwitchboardConstants.SEARCH_RANKING_SOLR_TITLE_PHRASE_BOOST_DEFAULT);
+        final float b = sb == null ? dflt : sb.getConfigFloat(key, dflt);
         if (!(b > 0f) || Float.isInfinite(b)) return null;
         // plain notation: Solr reads "^1.0E-4" as "^1.0" followed by other terms
         return java.math.BigDecimal.valueOf(Math.max(0.01f, Math.min(b, 1000f))).stripTrailingZeros().toPlainString();

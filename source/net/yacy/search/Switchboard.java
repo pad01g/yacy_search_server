@@ -174,6 +174,7 @@ import net.yacy.document.importer.WarcImporter;
 import net.yacy.document.importer.ZimImporter;
 import net.yacy.document.parser.audioTagParser;
 import net.yacy.document.parser.pdfParser;
+import net.yacy.document.parser.html.ContentScraper;
 import net.yacy.document.parser.html.Evaluation;
 import net.yacy.gui.Audio;
 import net.yacy.gui.Tray;
@@ -231,6 +232,8 @@ import net.yacy.search.schema.CollectionConfiguration;
 import net.yacy.search.schema.CollectionSchema;
 import net.yacy.search.schema.WebgraphConfiguration;
 import net.yacy.search.snippet.TextSnippet;
+import net.yacy.search.ranking.AnchorIndexer;
+import net.yacy.search.ranking.ClickStore;
 import net.yacy.search.vector.VectorIndexer;
 import net.yacy.server.serverCore;
 import net.yacy.server.serverSwitch;
@@ -923,6 +926,9 @@ public final class Switchboard extends serverSwitch {
 
         TextParser.setDenyMime(this.getConfig(SwitchboardConstants.PARSER_MIME_DENY, ""));
         TextParser.setDenyExtension(this.getConfig(SwitchboardConstants.PARSER_EXTENSIONS_DENY, ""));
+        ContentScraper.extractMainContent = this.getConfigBool("parser.html.mainContent", true);
+        final Set<String> boilerplateClasses = this.getConfigSet("parser.html.boilerplateClasses");
+        if (!boilerplateClasses.isEmpty()) ContentScraper.boilerplateClasses = boilerplateClasses;
 
         // start a loader
         this.log.config("Starting Crawl Loader");
@@ -1265,6 +1271,8 @@ public final class Switchboard extends serverSwitch {
 
         // vector search: embeds documents without an embedding while search.vector.enabled is true (docs/vector-search.md)
         VectorIndexer.start(this);
+        ClickStore.init(new File(this.dataPath, "DATA/WORK/clicks.json"));
+        AnchorIndexer.start(this);
         this.log.config("Finished Switchboard Initialization");
     }
 
@@ -1965,6 +1973,7 @@ public final class Switchboard extends serverSwitch {
     }
 
     public synchronized void close() {
+        ClickStore.get().save();
         this.log.config("SWITCHBOARD SHUTDOWN STEP 1: sending termination signal to managed threads:");
         /* Print also to the standard output : when this method is triggered by the shutdown hook thread, the LogManager is likely to have
          * been concurrently reset by its own shutdown hook thread */

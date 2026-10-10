@@ -346,6 +346,13 @@ parser.extensions.deny=iso,apk,dmg
 # Audio file extensions and media types can be enabled in the ConfigParser_p.html page if this is not a problem with your install 
 parser.enableAudioTags=false
 
+# index the main text of html pages: the text inside <main>, <article> or role=main when there is enough of it,
+# else the page without its furniture (<nav>, <aside>, a <header>/<footer> outside of an article, role=navigation,
+# role=banner...). Links in the furniture are still followed. Takes effect for pages parsed after a restart.
+parser.html.mainContent=true
+# CSS classes of page furniture without html5 markup (exact class names, comma separated); empty: the built-in list
+parser.html.boilerplateClasses=
+
 # experimental single-page parser for pdf files: split one pdf into individual pages;
 # the key is the property name in the post arguments that gets a page number assigned,
 # page numbers start with 1
@@ -1226,6 +1233,9 @@ search.ranking.solr.mm.cjk = 2<-1 5<80%
 search.ranking.coverage.exponent = 2
 # boost of the whole query as a phrase in the title (sent to remote peers with the query). 0 = off
 search.ranking.solr.titlePhraseBoost = 20
+# boost of the whole query as a phrase in the text (sent to remote peers with the query). 0 = off. Upstream used 10,
+# which put pages that merely mention the phrase ("CSS flexbox" in a list of extensions) above the page about it
+search.ranking.solr.textPhraseBoost = 2
 # thin content: results with fewer words than search.ranking.thin.words are weighted by
 # (words / search.ranking.thin.words) ^ search.ranking.thin.exponent (at least 0.1). 0 = off
 search.ranking.thin.words = 100
@@ -1247,6 +1257,37 @@ search.vector.weight = 1.0
 # how the two lists are merged: score (keyword score share + weight x scaled similarity; keeps clear keyword leads)
 # or rrf (reciprocal rank fusion: ranks only)
 search.vector.fusion = score
+# fusion "abs": the similarity counts from search.vector.simLow (nothing) to search.vector.simHigh (the full weight),
+# cosine similarities of the model; "score" scales it within the nearest documents, "rrf" uses the ranks only
+search.vector.simLow = 0.80
+search.vector.simHigh = 0.90
+# embeddings of later sections of long pages besides the start (0..3): a question about the middle of a long page
+# finds it. Costs one embedding per section when indexing and one more knn query per section when searching.
+# Changing it embeds all documents again. Off by default: on the docs-peer test set (docs/search-quality.md) it did not
+# rank the relevant pages better and doubled the search time.
+search.vector.sections = 0
+# false: search only the embeddings of the page starts (for comparisons; nothing is embedded again)
+search.vector.sections.search = true
+
+# the language chosen in the search form (lr parameter or the saved choice): "prefer" ranks pages in other languages
+# lower (their score times search.language.otherWeight), "filter" leaves them out. /language/xx in the query filters.
+search.language.mode = prefer
+search.language.otherWeight = 0.5
+
+# local results: keep only the best ranked of the copies of a page for other versions (docs/17/x, docs/current/x,
+# /v19.03/x, /v20.10/x) and of the spellings of one URL (trailing slash, index.html)
+search.ranking.collapseVersions = true
+
+# the results the administrator opens (clicks on the search page) for a query rank higher in later local searches of
+# the same query: their score times up to 1 + this weight (reached at 8 clicks). Stored in DATA/WORK/clicks.json,
+# never sent to other peers. 0 switches recording and use off.
+search.ranking.clicks.weight = 0.5
+
+# collect the anchor texts of the links to each page from the other pages of the index into anchors_in_txt (searched
+# with the boost given in search.ranking.solr.collection.boostfields): other names of a page ("HPA", a translated
+# title). Runs in the background, again for pages whose anchors are older than refreshHours (new pages link to them).
+search.ranking.anchors.enabled = true
+search.ranking.anchors.refreshHours = 24
 
 # The boost fields contains all fields which shall be searched together with a boost. non-mentioned fields are not searched.
 
@@ -1255,7 +1296,7 @@ search.vector.fusion = score
 # All boost methods > 0 must have names to be able to select this name with a query, with the syntax /name
 # The bostfields setting is of special importance as these are the fields used to query for search terms
 search.ranking.solr.collection.boostname.tmpa.0=Default Profile
-search.ranking.solr.collection.boostfields.tmpa.0=url_paths_sxt^3.0,synonyms_sxt^0.5,title^5.0,text_t^1.0,host_s^6.0,h1_txt^5.0,url_file_name_tokens_t^4.0,h2_txt^3.0,keywords^2.0,description_txt^1.5,author^1.0
+search.ranking.solr.collection.boostfields.tmpa.0=url_paths_sxt^3.0,synonyms_sxt^0.5,title^5.0,text_t^1.0,host_s^6.0,h1_txt^5.0,url_file_name_tokens_t^4.0,h2_txt^3.0,keywords^2.0,description_txt^1.5,author^1.0,anchors_in_txt^2.0
 search.ranking.solr.collection.filterquery.tmpa.0=
 search.ranking.solr.collection.boostquery.tmpa.0=crawldepth_i:0^0.8\ncrawldepth_i:1^0.4
 search.ranking.solr.collection.boostfunction.tmpb.0=

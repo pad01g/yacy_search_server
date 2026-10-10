@@ -150,6 +150,7 @@ public enum CollectionSchema implements SchemaDeclaration {
     robots_i(SolrType.num_integer, true, true, false, false, false, "content of <meta name=\"robots\" content=#content#> tag and the \"X-Robots-Tag\" HTTP property"),
     metagenerator_t(SolrType.text_general, true, true, false, false, false, "content of <meta name=\"generator\" content=#content#> tag"),
     inboundlinks_anchortext_txt(SolrType.text_general, true, true, true, false, true, "internal links, the visible anchor text"),
+    anchors_in_txt(SolrType.text_general, true, true, true, false, true, "the anchor texts of the links from other pages of the index to this page (written by the AnchorIndexer)"),
     outboundlinks_anchortext_txt(SolrType.text_general, true, true, true, false, true, "external links, the visible anchor text"),
 
     icons_urlstub_sxt(SolrType.string, true, true, true, false, true, "all icon links without the protocol and '://'"),

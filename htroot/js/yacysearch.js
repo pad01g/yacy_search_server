@@ -371,3 +371,26 @@ function hideErrThumbnails() {
 		hideBtn.className = hideBtn.className + " hidden";
 	}
 }
+
+/*
+ * Report a result the user opens (title or URL link) to api/click_p.json: later local searches for the same query
+ * rank it a little higher. Only the administrator's clicks are recorded (the API is protected), nothing is sent to
+ * other peers; search.ranking.clicks.weight = 0 switches it off.
+ */
+(function() {
+	function reportClick(event) {
+		if (!event.target || !event.target.closest || !navigator.sendBeacon) return;
+		var link = event.target.closest(".searchresults h4.linktitle a, .searchresults p.url a");
+		if (!link) return;
+		var item = link.closest(".searchresults");
+		var urlLink = item ? item.querySelector("p.url a[id^='url']") : null;
+		var input = document.getElementById("search");
+		if (!urlLink || !input || !input.value) return;
+		var body = new URLSearchParams();
+		body.set("query", input.value);
+		body.set("urlhash", urlLink.id.substring(3));
+		navigator.sendBeacon("api/click_p.json", body);
+	}
+	document.addEventListener("click", reportClick);
+	document.addEventListener("auxclick", reportClick); // middle click: opened in a new tab
+})();

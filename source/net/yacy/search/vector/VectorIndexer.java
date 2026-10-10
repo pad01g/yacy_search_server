@@ -17,16 +17,20 @@ package net.yacy.search.vector;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
+import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrInputDocument;
 
+import net.yacy.cora.federate.solr.connector.AbstractSolrConnector;
 import net.yacy.cora.util.ConcurrentLog;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
@@ -81,7 +85,8 @@ public final class VectorIndexer extends Thread {
                 final Switchboard sb = Switchboard.getSwitchboard();
                 if (sb != null && sb.index != null && VectorSearch.enabled()) {
                     final int n = step(sb);
-                    if (n > 0) sleep = 200;
+                    // n < 0: only documents that were just updated are left; Solr shows the update within seconds
+                    if (n > 0) sleep = 200; else if (n < 0) sleep = 3000;
                 }
             } catch (final Throwable e) {
                 this.errors.incrementAndGet();
@@ -102,28 +107,46 @@ public final class VectorIndexer extends Thread {
         return "*:* AND -" + VectorSearch.FIELD_MODEL + ":\"" + model.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
-    /** @return the number of documents embedded in this step */
+    /** the filter that leaves out documents updated just now and documents that failed too often */
+    static String skipFilter(final Collection<String> ids) {
+        if (ids.isEmpty()) return null;
+        // the terms parser has no clause limit; document ids are url hashes (letters, digits, - and _)
+        return "*:* AND NOT _query_:\"{!terms f=id}" + String.join(",", ids) + "\"";
+    }
+
+    /** @return the number of documents embedded in this step, or -1 when only just updated documents are pending */
     int step(final Switchboard sb) throws Exception {
         final long now = System.currentTimeMillis();
         this.recent.values().removeIf(t -> now - t > RECENT_MS);
-        final String model = VectorSearch.model();
-        final SolrDocumentList docs = sb.index.fulltext().getDefaultEmbeddedConnector().getDocumentListByQuery(
-                pendingQuery(model), null, 0, BATCH * 4, "id", "_version_", "title", "description_txt", "text_t");
+        final String signature = VectorSearch.signature();
+        final int sections = VectorSearch.sections();
+        final List<String> skip = new ArrayList<>(this.recent.keySet());
+        this.failures.forEach((id, n) -> { if (n >= 3) skip.add(id); });
+        final SolrQuery query = AbstractSolrConnector.getSolrQuery(pendingQuery(signature), null, 0, BATCH * 4, "id", "_version_", "title", "description_txt", "text_t");
+        final String fq = skipFilter(skip);
+        if (fq != null) query.addFilterQuery(fq);
+        final SolrDocumentList docs = sb.index.fulltext().getDefaultEmbeddedConnector().getDocumentListByParams(query);
+        final int chars = sb.getConfigInt(SwitchboardConstants.SEARCH_VECTOR_PASSAGE_CHARS, SwitchboardConstants.SEARCH_VECTOR_PASSAGE_CHARS_DEFAULT);
+        final String prefix = VectorSearch.prefix(SwitchboardConstants.SEARCH_VECTOR_PASSAGE_PREFIX);
+        // the start of each document and its sections, as many documents as fit into one request
         final List<SolrDocument> todo = new ArrayList<>();
+        final List<Integer> first = new ArrayList<>();
+        final List<String> passages = new ArrayList<>();
         for (final SolrDocument d : docs) {
             final String id = (String) d.getFieldValue("id");
             if (id == null || this.recent.containsKey(id) || this.failures.getOrDefault(id, 0) >= 3) continue;
+            final String title = join(d.getFieldValue("title")), text = join(d.getFieldValue("text_t"));
+            final List<String> mine = new ArrayList<>();
+            mine.add(prefix + VectorSearch.passage(title, join(d.getFieldValue("description_txt")), text, chars));
+            for (final String section : VectorSearch.sections(title, text, chars, sections)) mine.add(prefix + section);
+            if (!todo.isEmpty() && passages.size() + mine.size() > EmbeddingClient.MAX_BATCH) break;
             todo.add(d);
+            first.add(passages.size());
+            passages.addAll(mine);
             if (todo.size() >= BATCH) break;
         }
-        if (todo.isEmpty()) return 0;
-        final int chars = sb.getConfigInt(SwitchboardConstants.SEARCH_VECTOR_PASSAGE_CHARS, SwitchboardConstants.SEARCH_VECTOR_PASSAGE_CHARS_DEFAULT);
-        final String prefix = VectorSearch.prefix(SwitchboardConstants.SEARCH_VECTOR_PASSAGE_PREFIX);
-        final List<String> passages = new ArrayList<>(todo.size());
-        for (final SolrDocument d : todo) {
-            passages.add(prefix + VectorSearch.passage(join(d.getFieldValue("title")), join(d.getFieldValue("description_txt")), join(d.getFieldValue("text_t")), chars));
-        }
-        final float[][] vectors = VectorSearch.client().embed(passages, Duration.ofSeconds(60));
+        if (todo.isEmpty()) return docs.isEmpty() && this.recent.isEmpty() ? 0 : -1;
+        final float[][] vectors = VectorSearch.client().embed(passages, Duration.ofSeconds(120));
         final SolrClient solr = sb.index.fulltext().getDefaultEmbeddedConnector().getServer();
         int done = 0;
         for (int i = 0; i < todo.size(); i++) {
@@ -134,23 +157,40 @@ public final class VectorIndexer extends Thread {
             final Object version = d.getFieldValue("_version_");
             // the exact version read above: Solr refuses the update if the document changed or is gone
             update.setField("_version_", version == null ? 1L : version);
-            final List<Float> v = new ArrayList<>(vectors[i].length);
-            for (final float f : vectors[i]) v.add(f);
-            update.setField(VectorSearch.FIELD_VECTOR, Map.of("set", v));
-            update.setField(VectorSearch.FIELD_MODEL, Map.of("set", model));
+            final int from = first.get(i), to = i + 1 < first.size() ? first.get(i + 1) : passages.size();
+            update.setField(VectorSearch.FIELD_VECTOR, Map.of("set", asList(vectors[from])));
+            for (int s = 0; s < VectorSearch.FIELD_SECTION_VECTORS.length; s++) {
+                // a section the document no longer has (or sections switched off): remove the old vector
+                update.setField(VectorSearch.FIELD_SECTION_VECTORS[s], Collections.singletonMap("set", from + 1 + s < to ? asList(vectors[from + 1 + s]) : null));
+            }
+            update.setField(VectorSearch.FIELD_MODEL, Map.of("set", signature));
             try {
                 solr.add(update);
                 done++;
                 this.failures.remove(id);
             } catch (final Exception e) {
-                // version conflict (changed or deleted meanwhile) or a document Solr cannot update: try later, at most 3 times
-                this.failures.merge(id, 1, Integer::sum);
+                // a version conflict (crawled again, or the AnchorIndexer updated it meanwhile): try again later;
+                // another error (a document Solr cannot update): at most 3 times
+                if (!isVersionConflict(e)) this.failures.merge(id, 1, Integer::sum);
             }
             this.recent.put(id, now);
         }
         this.embedded.addAndGet(done);
         if (this.failures.size() > 100000) this.failures.clear();
         return done;
+    }
+
+    static boolean isVersionConflict(final Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof SolrException && ((SolrException) t).code() == SolrException.ErrorCode.CONFLICT.code) return true;
+        }
+        return false;
+    }
+
+    private static List<Float> asList(final float[] v) {
+        final List<Float> l = new ArrayList<>(v.length);
+        for (final float f : v) l.add(f);
+        return l;
     }
 
     static String join(final Object value) {

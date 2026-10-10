@@ -110,6 +110,8 @@ import net.yacy.search.ranking.ReferenceOrder;
 import net.yacy.search.schema.CollectionConfiguration;
 import net.yacy.search.schema.CollectionSchema;
 import net.yacy.search.snippet.TextSnippet;
+import net.yacy.search.ranking.ClickStore;
+import net.yacy.search.vector.VectorSearch;
 import net.yacy.search.snippet.TextSnippet.ResultClass;
 
 public final class SearchEvent implements ScoreMapUpdatesListener {
@@ -122,6 +124,7 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
     private static final int max_results_node = 150;
     private static final int RICH_TEXT_MIN_LENGTH = 256;
     private static final long LOCAL_RICH_TEXT_RANKING_BOOST = 64_000_000L;
+
     private static final String INTERNAL_SOURCE_LOCAL_FIELD = "_yacy_source_local_b";
     private static final String INTERNAL_CANDIDATE_QUALITY_FIELD = "_yacy_candidate_quality_i";
 
@@ -242,6 +245,9 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
     private final boolean disablePostRanking;
     /** thin content weighting, see {@link SwitchboardConstants#SEARCH_RANKING_THIN_WORDS} */
     private final int thinWords;
+    /** clicks of the administrator on results of this query (local searches only), see {@link ClickStore} */
+    private final Map<String, Integer> clicks;
+    private final double clickWeight;
     private final double thinExponent;
     public  final boolean excludeintext_image;
 
@@ -451,6 +457,9 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         final boolean text = this.query.contentdom == ContentDomain.TEXT || this.query.contentdom == ContentDomain.ALL;
         final Switchboard thinSb = Switchboard.getSwitchboard();
         this.thinWords = !text || thinSb == null ? 0 : thinSb.getConfigInt(SwitchboardConstants.SEARCH_RANKING_THIN_WORDS, SwitchboardConstants.SEARCH_RANKING_THIN_WORDS_DEFAULT);
+        this.clickWeight = thinSb == null || query.servesRemotePeer() ? 0.0d
+                : thinSb.getConfigFloat(SwitchboardConstants.SEARCH_RANKING_CLICKS_WEIGHT, SwitchboardConstants.SEARCH_RANKING_CLICKS_WEIGHT_DEFAULT);
+        this.clicks = this.clickWeight > 0 ? ClickStore.get().clicks(query.getQueryGoal().getQueryString(false)) : java.util.Collections.emptyMap();
         this.thinExponent = thinSb == null ? SwitchboardConstants.SEARCH_RANKING_THIN_EXPONENT_DEFAULT
                 : thinSb.getConfigFloat(SwitchboardConstants.SEARCH_RANKING_THIN_EXPONENT, SwitchboardConstants.SEARCH_RANKING_THIN_EXPONENT_DEFAULT);
         this.receivedRemoteReferences = new AtomicInteger(0);
@@ -520,8 +529,10 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         } else {
             this.primarySearchThreadsL = null;
             this.nodeSearchThreads = null;
-            this.pollImmediately = !query.getSegment().connectedRWI()
-                    || !Switchboard.getSwitchboard().getConfigBool(SwitchboardConstants.INDEX_RECEIVE_ALLOW_SEARCH, false);
+            // the results of a local search are ranked again when they are added (term coverage, thin pages, author
+            // signature) and arrive from several threads (Solr, word index, snippets): taking them in the order of
+            // arrival would make the order of equal searches differ
+            this.pollImmediately = false;
             if ( generateAbstracts ) {
                 // we need the results now
                 try {
@@ -1168,7 +1179,12 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
                             final double normalized = maxSolrScore > 0.0f ? scorex / maxSolrScore : scorex; // normalize to [0,1] across this peer's batch so scores are comparable across peers
                             final double covered = Math.max(guaranteedCoverage, termCoverage(iEntry, coverageTerms, this.snippets.get(urlHash)));
                             final double coverage = Math.max(COVERAGE_FLOOR, Math.pow(covered, coverageExponent));
-                            score = (long) ((1000000.0d * normalized * coverage) - iEntry.urllength());
+                            // a preferred language: Solr already weighted the keyword matches, the vector search did not
+                            final double language = Boolean.FALSE.equals(iEntry.getFieldValue(VectorSearch.FIELD_KEYWORD_MATCH))
+                                    ? this.query.languageWeight(iEntry.language()) : 1.0d;
+                            // pages the administrator opened for this query before
+                            final double clicked = ClickStore.weight(this.clicks.getOrDefault(urlHash, 0), this.clickWeight);
+                            score = (long) ((1000000.0d * normalized * coverage * language * clicked) - iEntry.urllength());
                         } else
                             score = this.order.cardinal(iEntry);
                         this.nodeStack.put(new ReverseElement<>(iEntry, score)); // inserts the element and removes the worst (which is smallest)
@@ -2046,6 +2062,11 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
     }
 
     /** weight a ranking by {@link #thinWeight}; a lower weight lowers also a negative ranking */
+    /** @return the ranking moved into a band below all Solr rankings (which are below 2^40), keeping the order */
+    static long wordIndexBand(final long ranking) {
+        return Math.max(-RANKING_LIMIT / 2, Math.min(1L << 40, ranking) - (1L << 41));
+    }
+
     static long thinRanking(final long ranking, final int words, final int thinWords, final double exponent) {
         final double w = thinWeight(words, thinWords, exponent);
         if (w >= 1.0d) return ranking;
@@ -2145,12 +2166,17 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         // a word index entry (e.g. from a DHT transfer) must not attach a document to words its author did not index
         if (resultEntry.word() != null && !verdict.containsAll(this.query.getQueryGoal().getIncludeHashes())) return;
         final long rankingBoost = isPreferredLocalRichCandidate(resultEntry) ? LOCAL_RICH_TEXT_RANKING_BOOST : 0L;
-        final long raw = (this.disablePostRanking ? score : (score * 128) + postRanking(resultEntry, this.ref /*this.getTopicNavigator(MAX_TOPWORDS)*/)) + rankingBoost;
+        long raw = (this.disablePostRanking ? score : (score * 128) + postRanking(resultEntry, this.ref /*this.getTopicNavigator(MAX_TOPWORDS)*/)) + rankingBoost;
+        // a local search: every local document is also in the Solr index, whose ranking (and vector search) placed
+        // the documents that only the word index delivered further down. Their word index score has another scale
+        // and would put them in front of the Solr results, so they follow them (in their own order).
+        if (!this.remote && isLocalCandidate(resultEntry) && currentCandidateQuality(resultEntry) < 100) raw = wordIndexBand(raw);
         final long ranking = trustRanking(thinRanking(raw, resultEntry.wordCountOrUnknown(), this.thinWords, this.thinExponent), verdict);
         // TODO: above was originally using (see below), but getTopicNavigator returns this.ref and possibliy alters this.ref on first call (this.ref.size < 2 -> this.ref.clear)
         // TODO: verify and straighten the use of addTopic, getTopic and getTopicNavigator and related score calculation
         // final long ranking = ((long) (score * 128.f)) + postRanking(resultEntry, this.getTopicNavigator(MAX_TOPWORDS));
 
+        if (Switchboard.getSwitchboard().getConfigBool("search.debug.ranking", false)) log.info("RANKDEBUG " + resultEntry.urlstring() + " score=" + score + " boost=" + rankingBoost + " raw=" + raw + " words=" + resultEntry.wordCountOrUnknown() + " ranking=" + ranking + " kw=" + resultEntry.getFieldValue(VectorSearch.FIELD_KEYWORD_MATCH) + " q=" + currentCandidateQuality(resultEntry) + " local=" + isLocalCandidate(resultEntry));
         resultEntry.setScore(ranking); // update the score of resultEntry for access by search interface / api
         this.resultList.put(new ReverseElement<>(resultEntry, ranking)); // remove smallest in case of overflow
         if (this.pollImmediately) this.resultList.poll(); // prevent re-ranking in case there is only a single index source which has already ranked entries.
@@ -2334,6 +2360,9 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
      * @param timeout
      * @return
      */
+    /** the longest time a local search waits for its remaining results before the first is taken */
+    static final long LOCAL_RANKING_WAIT_MS = 2000;
+
     public URIMetadataNode oneResult(final int item, final long timeout) {
         // check if we already retrieved this item
         // (happens if a search pages is accessed a second time)
@@ -2387,6 +2416,23 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
             resultListIndex = item;
         } else {
             resultListIndex = item - (this.localsolroffset - this.query.itemsPerPage);
+        }
+        if (!this.remote) {
+            // a local search: rank all local results before the first is taken, so that a better result that
+            // arrives later (snippet threads, the word index) is not placed behind a worse one (within the timeout)
+            final long rankingDeadline = Math.min(finishTime, System.currentTimeMillis() + LOCAL_RANKING_WAIT_MS);
+            while (System.currentTimeMillis() < rankingDeadline) {
+                if (!drainStacksToResult(true)) {
+                    // nothing could be taken: done when no feeder (Solr, word index, snippet thread) is still running
+                    if (this.isFeedingFinished() && this.nodeStack.sizeQueue() == 0) break;
+                    try {
+                        Thread.sleep(5);
+                    } catch (final InterruptedException e) {
+                        log.warn("Search results wait was interrupted.");
+                        break;
+                    }
+                }
+            }
         }
         while ( this.resultList.sizeAvailable() <= resultListIndex &&
                 (this.rwiQueueSize() > 0 || this.nodeStack.sizeQueue() > 0 ||

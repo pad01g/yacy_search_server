@@ -640,13 +640,15 @@ public class yacysearch {
             final boolean languageFromParam = post.containsKey("lr"); // lr was explicitly submitted in this request
             final String lrParam = languageFromParam ? post.get("lr") : null;
             String language;
+            // the language chosen in the form: a filter, or (default) a preference that ranks other languages lower
+            String chosenLanguage = null;
             if (lrParam != null && lrParam.startsWith("lang_") && ISO639.exists(lrParam.substring(5))) {
                 language = lrParam.substring(5);
-                if (modifier.language == null) modifier.language = language;
+                chosenLanguage = language;
             } else if (!languageFromParam && cookieLanguage != null) {
                 // no lr param submitted this request — use saved cookie preference
                 language = cookieLanguage;
-                if (modifier.language == null) modifier.language = language;
+                chosenLanguage = language;
             } else {
                 // lr was submitted as empty/invalid (clear preference) or no cookie exists
                 String agent = header.get(HeaderFramework.ACCEPT_LANGUAGE);
@@ -659,14 +661,24 @@ public class yacysearch {
                 }
             }
 
+            String preferLanguage = null;
+            if (chosenLanguage != null && modifier.language == null) {
+                if ("filter".equals(sb.getConfig(SwitchboardConstants.SEARCH_LANGUAGE_MODE, SwitchboardConstants.SEARCH_LANGUAGE_MODE_DEFAULT))) {
+                    modifier.language = chosenLanguage;
+                } else {
+                    preferLanguage = chosenLanguage;
+                }
+            }
+
             // persist language preference when user explicitly submits a change via the lr param
-            prop.put("languageSel", modifier.language != null ? "lang_" + modifier.language : "");
+            final String selectedLanguage = modifier.language != null ? modifier.language : preferLanguage;
+            prop.put("languageSel", selectedLanguage != null ? "lang_" + selectedLanguage : "");
             if (languageFromParam) {
                 final ResponseHeader outgoingHeader = prop.getOutgoingHeader();
-                if (modifier.language != null) {
+                if (selectedLanguage != null) {
                     outgoingHeader.add(
                         HeaderFramework.SET_COOKIE,
-                        "yacy-language=lang_" + modifier.language +
+                        "yacy-language=lang_" + selectedLanguage +
                         "; Max-Age=" + (365 * 24 * 60 * 60) +
                         "; Path=/"
                     );
@@ -831,6 +843,8 @@ public class yacysearch {
                     lat, lon, rad,
                     sb.getConfigSet("search.navigation"));
             theQuery.setStrictContentDom(strictContentDom);
+            if (preferLanguage != null) theQuery.preferLanguage(preferLanguage,
+                    sb.getConfigFloat(SwitchboardConstants.SEARCH_LANGUAGE_OTHER_WEIGHT, SwitchboardConstants.SEARCH_LANGUAGE_OTHER_WEIGHT_DEFAULT));
             theQuery.setMaxSuggestions(meanMax);
             theQuery.setStandardFacetsMaxCount(sb.getConfigInt(SwitchboardConstants.SEARCH_NAVIGATION_MAXCOUNT,
                     QueryParams.FACETS_STANDARD_MAXCOUNT_DEFAULT));

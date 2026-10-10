@@ -18,9 +18,11 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.common.SolrDocument;
@@ -29,6 +31,7 @@ import org.apache.solr.common.SolrDocumentList;
 import net.yacy.cora.util.ConcurrentLog;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
+import net.yacy.search.ranking.VersionCollapse;
 
 /**
  * Vector search (docs/vector-search.md): settings, the query embedding, the k-nearest-neighbour Solr query and the
@@ -39,6 +42,10 @@ public final class VectorSearch {
     /** Solr fields; the dimension of embedding_knn is fixed in defaults/solr/schema.xml */
     public static final String FIELD_VECTOR = "embedding_knn";
     public static final String FIELD_MODEL = "embedding_model_s";
+    /** embeddings of later sections of a long page, see {@link #sections()} */
+    public static final String[] FIELD_SECTION_VECTORS = {"embedding_knn_1", "embedding_knn_2", "embedding_knn_3"};
+    /** a section shorter than this is not embedded on its own */
+    static final int MIN_SECTION_CHARS = 200;
     public static final int DIMENSION = 384;
     /** reciprocal rank fusion constant: rank r adds 1 / (RRF_K + r) */
     static final int RRF_K = 60;
@@ -69,6 +76,22 @@ public final class VectorSearch {
         return sb == null ? SwitchboardConstants.SEARCH_VECTOR_MODEL_DEFAULT : sb.getConfig(SwitchboardConstants.SEARCH_VECTOR_MODEL, SwitchboardConstants.SEARCH_VECTOR_MODEL_DEFAULT);
     }
 
+    /** @return the number of section embeddings per document besides the start of the page (0..3) */
+    public static int sections() {
+        final Switchboard sb = Switchboard.getSwitchboard();
+        final int n = sb == null ? SwitchboardConstants.SEARCH_VECTOR_SECTIONS_DEFAULT : sb.getConfigInt(SwitchboardConstants.SEARCH_VECTOR_SECTIONS, SwitchboardConstants.SEARCH_VECTOR_SECTIONS_DEFAULT);
+        return Math.max(0, Math.min(FIELD_SECTION_VECTORS.length, n));
+    }
+
+    /**
+     * @return what the embeddings of a document are made with, stored in embedding_model_s: the model and the number
+     *         of sections. Documents with another value are embedded again.
+     */
+    public static String signature() {
+        final int s = sections();
+        return s == 0 ? model() : model() + " sections=" + s;
+    }
+
     static EmbeddingClient client() {
         final Switchboard sb = Switchboard.getSwitchboard();
         return new EmbeddingClient(sb.getConfig(SwitchboardConstants.SEARCH_VECTOR_URL, ""), model(), DIMENSION);
@@ -94,16 +117,77 @@ public final class VectorSearch {
     }
 
     /**
-     * @return the embedding of a query, or null if the service is not available (then the search uses keywords only;
-     *         after a failure the service is not asked again for 30 seconds, so searches do not wait for it)
+     * The later sections of a page: the text after the start (which {@link #passage} covers), cut at headings
+     * (the parser writes them as markdown "# ") into pieces of at most chars characters, each with the title in
+     * front. A long page is represented by its start and its first n sections after it.
      */
+    static List<String> sections(final String title, final String text, final int chars, final int n) {
+        final List<String> out = new ArrayList<>();
+        if (n <= 0 || text == null || text.length() <= chars) return out;
+        final String head = title == null || title.isBlank() ? "" : title.replaceAll("\\s+", " ").trim() + "\n";
+        final int room = Math.max(MIN_SECTION_CHARS, chars - head.length());
+        final StringBuilder chunk = new StringBuilder();
+        for (final String piece : text.substring(chars).split("(?=\\n#{1,6} )")) {
+            String p = piece.replaceAll("\\s+", " ").trim();
+            while (!p.isEmpty()) {
+                if (chunk.length() > 0 && chunk.length() + 1 + p.length() > room) {
+                    if (chunk.length() >= MIN_SECTION_CHARS) out.add(head + chunk);
+                    chunk.setLength(0);
+                    if (out.size() >= n) return out;
+                }
+                final int take = Math.min(p.length(), room - chunk.length() - (chunk.length() > 0 ? 1 : 0));
+                if (chunk.length() > 0) chunk.append(' ');
+                chunk.append(p, 0, take);
+                p = p.substring(take).trim();
+            }
+        }
+        if (chunk.length() >= MIN_SECTION_CHARS && out.size() < n) out.add(head + chunk);
+        return out;
+    }
+
+    /** @return the documents of several nearest-neighbour lists by their best similarity, at most topK */
+    public static SolrDocumentList bestOf(final List<SolrDocumentList> lists, final int topK) {
+        final Map<String, SolrDocument> best = new LinkedHashMap<>();
+        long found = 0;
+        for (final SolrDocumentList l : lists) {
+            found = Math.max(found, l.getNumFound());
+            for (final SolrDocument d : l) {
+                final String id = (String) d.getFieldValue("id");
+                if (id == null) continue;
+                final SolrDocument known = best.get(id);
+                if (known == null || scoreOf(d) > scoreOf(known)) best.put(id, d);
+            }
+        }
+        final List<SolrDocument> order = new ArrayList<>(best.values());
+        order.sort((a, b) -> Double.compare(scoreOf(b), scoreOf(a)));
+        final SolrDocumentList out = new SolrDocumentList();
+        for (final SolrDocument d : order) {
+            if (out.size() >= topK) break;
+            out.add(d);
+        }
+        out.setNumFound(Math.max(found, out.size()));
+        return out;
+    }
+
+    /**
+     * @return the embedding of a query, or null if the service is not available or does not answer within
+     *         {@link #QUERY_TIMEOUT_MS} (then the search uses keywords only; after a failure the service is not asked
+     *         again for 30 seconds, so searches do not wait for it)
+     */
+    /**
+     * Wait for a query embedding at most this long. The keyword results are merged with the vector results before
+     * they are ranked, and a local search ranks what arrived within SearchEvent.LOCAL_RANKING_WAIT_MS (2 s): a slower
+     * answer (the service is busy embedding documents) would leave the keyword results out of the ranking.
+     */
+    static final long QUERY_TIMEOUT_MS = 1000;
+
     public static float[] queryVector(final String query) {
         if (query == null || query.isBlank()) return null;
         final float[] cached = queryCache.get(query);
         if (cached != null) return cached;
         if (System.currentTimeMillis() - failedAt < 30000) return null;
         try {
-            final float[] v = client().embed(List.of(prefix(SwitchboardConstants.SEARCH_VECTOR_QUERY_PREFIX) + query), Duration.ofSeconds(3))[0];
+            final float[] v = client().embed(List.of(prefix(SwitchboardConstants.SEARCH_VECTOR_QUERY_PREFIX) + query), Duration.ofMillis(QUERY_TIMEOUT_MS))[0];
             queryCache.put(query, v);
             return v;
         } catch (final IOException | RuntimeException e) {
@@ -115,11 +199,15 @@ public final class VectorSearch {
 
     /** the knn variant of a keyword query: the same filters and fields, the nearest topK documents, no highlighting */
     public static SolrQuery knnQuery(final SolrQuery keywordQuery, final float[] vector, final int topK) {
+        return knnQuery(keywordQuery, vector, topK, FIELD_VECTOR);
+    }
+
+    public static SolrQuery knnQuery(final SolrQuery keywordQuery, final float[] vector, final int topK, final String field) {
         final SolrQuery q = keywordQuery.getCopy();
         for (final String p : new String[] {"defType", "qf", "pf", "pf2", "pf3", "ps", "mm", "bq", "bf", "boost", "tie", "q.op", "sort", "facet", "facet.field", "hl", "hl.fl", "partitions"}) {
             q.remove(p);
         }
-        q.setQuery("{!knn f=" + FIELD_VECTOR + " topK=" + topK + "}" + vectorString(vector));
+        q.setQuery("{!knn f=" + field + " topK=" + topK + "}" + vectorString(vector));
         q.setStart(0);
         q.setRows(topK);
         q.set("hl", false);
@@ -146,6 +234,25 @@ public final class VectorSearch {
      * small later weights (term coverage, thin pages) decide the order.
      */
     public static SolrDocumentList fuseScores(final SolrDocumentList keyword, final SolrDocumentList nearest, final float vectorWeight, final int limit) {
+        return fuseScores(keyword, nearest, vectorWeight, limit, Double.NaN, Double.NaN);
+    }
+
+    /**
+     * Score fusion with the similarity scaled between fixed bounds (search.vector.fusion=abs): a cosine similarity of
+     * low or less adds nothing, high or more the full vectorWeight. Unlike the scaling within the nearest documents,
+     * the best of a list of poor matches does not get the full weight.
+     */
+    public static SolrDocumentList fuseScoresAbsolute(final SolrDocumentList keyword, final SolrDocumentList nearest, final float vectorWeight, final int limit, final double low, final double high) {
+        return fuseScores(keyword, nearest, vectorWeight, limit, low, high);
+    }
+
+    /** Solr's knn score of the cosine similarity c is (1 + c) / 2 */
+    static double cosine(final double knnScore) {
+        return 2.0 * knnScore - 1.0;
+    }
+
+    private static SolrDocumentList fuseScores(final SolrDocumentList keyword, final SolrDocumentList nearest, final float vectorWeight, final int limit, final double low, final double high) {
+        final boolean absolute = !Double.isNaN(low) && !Double.isNaN(high) && high > low;
         final Map<String, SolrDocument> docs = new LinkedHashMap<>();
         final Map<String, Double> score = new LinkedHashMap<>();
         double maxKeyword = 0;
@@ -158,17 +265,18 @@ public final class VectorSearch {
             docs.put(id, d);
             score.put(id, maxKeyword > 0 ? scoreOf(d) / maxKeyword : 0);
         }
-        double top = Double.NEGATIVE_INFINITY, low = Double.POSITIVE_INFINITY;
+        double top = Double.NEGATIVE_INFINITY, bottom = Double.POSITIVE_INFINITY;
         for (final SolrDocument d : nearest) {
             top = Math.max(top, scoreOf(d));
-            low = Math.min(low, scoreOf(d));
+            bottom = Math.min(bottom, scoreOf(d));
         }
         int rank = 0;
         for (final SolrDocument d : nearest) {
             final String id = (String) d.getFieldValue("id");
             if (id == null) continue;
             rank++;
-            final double similarity = top > low ? (scoreOf(d) - low) / (top - low) : 1.0;
+            final double similarity = absolute ? Math.max(0.0, Math.min(1.0, (cosine(scoreOf(d)) - low) / (high - low)))
+                    : top > bottom ? (scoreOf(d) - bottom) / (top - bottom) : 1.0;
             final SolrDocument known = docs.get(id);
             if (known != null) {
                 known.setField(FIELD_VECTOR_RANK, rank);
@@ -191,9 +299,14 @@ public final class VectorSearch {
         final List<String> order = new ArrayList<>(docs.keySet());
         order.sort((a, b) -> Double.compare(score.get(b), score.get(a)));
         final SolrDocumentList out = new SolrDocumentList();
+        final Set<String> seen = new HashSet<>();
         for (final String id : order) {
             if (out.size() >= limit) break;
             final SolrDocument d = docs.get(id);
+            // another version or spelling of a better ranked page: the fused list is longer than the page, so the
+            // page is still filled
+            final Object url = d.getFieldValue("sku");
+            if (VersionCollapse.enabled && url != null && !seen.add(VersionCollapse.key(url.toString()))) continue;
             d.setField("score", (float) (score.get(id) * scale));
             out.add(d);
         }
@@ -242,6 +355,13 @@ public final class VectorSearch {
 
     /** the fusion of search.vector.fusion: "score" (default) or "rrf" */
     public static SolrDocumentList fuse(final String mode, final SolrDocumentList keyword, final SolrDocumentList nearest, final float vectorWeight, final int limit) {
-        return "rrf".equals(mode) ? fuse(keyword, nearest, vectorWeight, limit) : fuseScores(keyword, nearest, vectorWeight, limit);
+        if ("rrf".equals(mode)) return fuse(keyword, nearest, vectorWeight, limit);
+        if ("abs".equals(mode)) {
+            final Switchboard sb = Switchboard.getSwitchboard();
+            final double low = sb == null ? SwitchboardConstants.SEARCH_VECTOR_SIM_LOW_DEFAULT : sb.getConfigFloat(SwitchboardConstants.SEARCH_VECTOR_SIM_LOW, SwitchboardConstants.SEARCH_VECTOR_SIM_LOW_DEFAULT);
+            final double high = sb == null ? SwitchboardConstants.SEARCH_VECTOR_SIM_HIGH_DEFAULT : sb.getConfigFloat(SwitchboardConstants.SEARCH_VECTOR_SIM_HIGH, SwitchboardConstants.SEARCH_VECTOR_SIM_HIGH_DEFAULT);
+            return fuseScoresAbsolute(keyword, nearest, vectorWeight, limit, low, high);
+        }
+        return fuseScores(keyword, nearest, vectorWeight, limit);
     }
 }

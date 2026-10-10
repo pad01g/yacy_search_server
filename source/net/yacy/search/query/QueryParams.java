@@ -192,6 +192,26 @@ public final class QueryParams {
     public boolean servesRemotePeer() {
         return this.servesRemotePeer;
     }
+
+    /** see {@link #allowVectorSearch(boolean)} */
+    private volatile boolean vectorSearchAllowed = false;
+
+    /**
+     * Let this search use the vector search (an embedding of the query by a model and knn queries). Only searches of
+     * the owner (or of everybody with search.vector.public=true): each new query costs a model run, which visitors
+     * of a public search page should not be able to cause in numbers.
+     */
+    public void allowVectorSearch(final boolean allowed) {
+        this.vectorSearchAllowed = allowed;
+        this.idCache = null;
+        this.idCacheAnon = null;
+    }
+
+    /** @return true if this search may use the vector search: allowed, not for another peer, text results */
+    public boolean vectorSearch() {
+        return this.vectorSearchAllowed && !this.servesRemotePeer
+                && (this.contentdom == Classification.ContentDomain.TEXT || this.contentdom == Classification.ContentDomain.ALL);
+    }
     
 	/**
 	 * The maximum number of suggestions ("Did you mean") to display at the top of
@@ -650,8 +670,10 @@ public final class QueryParams {
     public void preferLanguage(final String language, final float otherWeight) {
         if (language == null || !language.matches("[a-z]{2,3}")) return;
         this.preferLanguage = language;
-        this.otherLanguageWeight = Math.max(0f, Math.min(1f, otherWeight));
+        this.otherLanguageWeight = otherWeight >= 0f ? Math.min(1f, otherWeight) : 0.5f; // NaN would make Solr reject the boost
         this.cachedQuery = null;
+        this.idCache = null;
+        this.idCacheAnon = null;
     }
 
     public String preferLanguage() {
@@ -1143,6 +1165,8 @@ public final class QueryParams {
             context.append(Base64Order.enhancedCoder.encodeString(this.urlMaskString)).append(asterisk);
             context.append(this.modifier.sitehash).append(asterisk);
             context.append(this.servesRemotePeer ? "remote" : "").append(asterisk); // other trust filtering
+            context.append(this.preferLanguage).append(this.otherLanguageWeight).append(asterisk);
+            context.append(this.vectorSearchAllowed ? "vector" : "").append(asterisk);
             context.append(this.modifier.author).append(asterisk);
             context.append(this.modifier.protocol).append(asterisk);
             context.append(this.modifier.filetype).append(asterisk);

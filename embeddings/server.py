@@ -15,6 +15,9 @@ from fastembed.common.model_description import ModelSource, PoolingType
 
 MODEL = os.environ.get("EMBEDDINGS_MODEL", "intfloat/multilingual-e5-small")
 PORT = int(os.environ.get("EMBEDDINGS_PORT", "8095"))
+# all interfaces, so that the YaCy container reaches it on a Docker network; the service has no authentication:
+# do not publish its port beyond that network (EMBEDDINGS_HOST=127.0.0.1 outside containers)
+HOST = os.environ.get("EMBEDDINGS_HOST", "0.0.0.0")
 MAX_INPUTS = 64           # texts per request
 MAX_CHARS = 4000          # per text; e5 reads at most 512 tokens anyway
 MAX_BODY = 4 << 20
@@ -31,12 +34,16 @@ model = TextEmbedding(MODEL, cache_dir=os.environ.get("EMBEDDINGS_CACHE", "/mode
 # Batches (YaCy embedding its index) run one at a time; single texts (search queries) do not queue behind them.
 # onnxruntime sessions and the tokenizer may be used from several threads.
 batch_lock = threading.Lock()
+# single texts run in parallel, but not without limit
+single_slots = threading.BoundedSemaphore(int(os.environ.get("EMBEDDINGS_PARALLEL", "4")))
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "yacy-embeddings"
     # keep-alive: clients such as Java's HttpClient reuse connections; every answer has a content-length
     protocol_version = "HTTP/1.1"
+    # a client that stops sending (or keeps an idle connection) does not hold a thread for ever
+    timeout = 60
 
     def log_message(self, fmt, *args):  # quiet
         pass
@@ -57,7 +64,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/v1/embeddings":
             return self.reply(404, {"error": "not found"})
-        n = int(self.headers.get("content-length") or 0)
+        try:
+            n = int(self.headers.get("content-length") or 0)
+        except ValueError:
+            n = 0
         if n <= 0 or n > MAX_BODY:
             return self.reply(413, {"error": "body too large or empty"})
         try:
@@ -73,7 +83,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(400, {"error": "bad JSON"})
         texts = [x[:MAX_CHARS] for x in inputs]
         if len(texts) == 1:
-            vectors = list(model.embed(texts, batch_size=1))
+            with single_slots:
+                vectors = list(model.embed(texts, batch_size=1))
         else:
             with batch_lock:
                 vectors = list(model.embed(texts, batch_size=BATCH))
@@ -88,4 +99,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--download":
         print("model ready:", MODEL)
         sys.exit(0)
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

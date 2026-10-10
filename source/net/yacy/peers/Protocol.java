@@ -1379,10 +1379,9 @@ public final class Protocol {
                     if (!sc.isClosed()) {
                         rsp[0] = sc.getResponseByParams(solrQuery);
                         docList[0] = rsp[0].getResults();
-                        VersionCollapse.enabled = Switchboard.getSwitchboard().getConfigBool(SwitchboardConstants.SEARCH_RANKING_COLLAPSE_VERSIONS, true);
-                        if (VersionCollapse.enabled) docList[0] = VersionCollapse.collapse(docList[0], Integer.MAX_VALUE);
+                        if (VersionCollapse.enabled()) docList[0] = VersionCollapse.collapse(docList[0], Integer.MAX_VALUE);
                         // vector search: merge the documents nearest to the query (also those the keyword query missed)
-                        if (offset == 0 && VectorSearch.enabled() && !event.query.servesRemotePeer()) {
+                        if (offset == 0 && VectorSearch.enabled() && event.query.vectorSearch()) {
                             final float[] v = VectorSearch.queryVector(event.query.getQueryGoal().getQueryString(false));
                             if (v != null) {
                                 final Switchboard sb = Switchboard.getSwitchboard();

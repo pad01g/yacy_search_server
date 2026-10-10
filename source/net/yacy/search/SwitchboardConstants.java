@@ -744,6 +744,8 @@ public final class SwitchboardConstants {
      * /v1/embeddings service, and local searches merge the nearest documents with the keyword results.
      */
     public static final String SEARCH_VECTOR_ENABLED = "search.vector.enabled";
+    /** true: searches of everybody may use the vector search; false: only the administrator's (and localhost's) */
+    public static final String SEARCH_VECTOR_PUBLIC = "search.vector.public";
     public static final String SEARCH_VECTOR_URL = "search.vector.embeddings.url";
     public static final String SEARCH_VECTOR_MODEL = "search.vector.model";
     public static final String SEARCH_VECTOR_MODEL_DEFAULT = "intfloat/multilingual-e5-small";

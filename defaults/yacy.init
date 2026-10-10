@@ -1247,6 +1247,10 @@ search.ranking.thin.exponent = 1.0
 # the keyword results (reciprocal rank fusion, the vector list weighted by search.vector.weight). Documents that miss
 # some query words but mean the same are found this way. The schema field has 384 dimensions: use a model with 384.
 search.vector.enabled = false
+# false: only searches of the administrator (with the password, or from localhost when adminAccountForLocalhost is
+# on) use the vector search; each new query costs a model run, which visitors of a public search page should not
+# cause in numbers. true: every search of this peer's search page (never the searches of other peers).
+search.vector.public = false
 search.vector.embeddings.url = http://127.0.0.1:8095/v1/embeddings
 search.vector.model = intfloat/multilingual-e5-small
 search.vector.queryPrefix = query:
@@ -1286,8 +1290,10 @@ search.ranking.clicks.weight = 0.5
 # collect the anchor texts of the links to each page from the other pages of the index into anchors_in_txt (searched
 # with the boost given in search.ranking.solr.collection.boostfields): other names of a page ("HPA", a translated
 # title). Runs in the background, again for pages whose anchors are older than refreshHours (new pages link to them).
-search.ranking.anchors.enabled = true
-search.ranking.anchors.refreshHours = 24
+# Off by default: each visit rewrites the whole Solr document (an atomic update re-indexes all fields), and on the
+# docs-peer test set (docs/search-quality.md) it did not change where the relevant pages ranked.
+search.ranking.anchors.enabled = false
+search.ranking.anchors.refreshHours = 168
 
 # The boost fields contains all fields which shall be searched together with a boost. non-mentioned fields are not searched.
 

@@ -1973,6 +1973,8 @@ public final class Switchboard extends serverSwitch {
     }
 
     public synchronized void close() {
+        VectorIndexer.shutdown();
+        AnchorIndexer.shutdown();
         ClickStore.get().save();
         this.log.config("SWITCHBOARD SHUTDOWN STEP 1: sending termination signal to managed threads:");
         /* Print also to the standard output : when this method is triggered by the shutdown hook thread, the LogManager is likely to have

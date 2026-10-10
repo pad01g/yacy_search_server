@@ -144,7 +144,7 @@ public class VectorSearchTest {
     @Test
     public void testSkipFilter() {
         assertEquals(null, VectorIndexer.skipFilter(java.util.List.of()));
-        assertEquals("*:* AND NOT _query_:\"{!terms f=id}abc-_1,XYZ\"", VectorIndexer.skipFilter(java.util.List.of("abc-_1", "XYZ")));
+        assertEquals("{!lucene cache=false}*:* AND NOT _query_:\"{!terms f=id}abc-_1,XYZ\"", VectorIndexer.skipFilter(java.util.List.of("abc-_1", "XYZ")));
     }
 
     @Test

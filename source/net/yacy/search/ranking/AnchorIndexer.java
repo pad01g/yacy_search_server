@@ -72,13 +72,18 @@ public final class AnchorIndexer extends Thread {
         instance.start();
     }
 
+    /** stop the thread (YaCy shuts down) */
+    public static synchronized void shutdown() {
+        if (instance != null) instance.interrupt();
+    }
+
     @Override
     public void run() {
         while (!isInterrupted()) {
             long sleep = IDLE_MS;
             try {
                 final Switchboard sb = Switchboard.getSwitchboard();
-                if (sb != null && sb.index != null && sb.getConfigBool(SwitchboardConstants.SEARCH_RANKING_ANCHORS_ENABLED, true)) {
+                if (sb != null && sb.index != null && sb.getConfigBool(SwitchboardConstants.SEARCH_RANKING_ANCHORS_ENABLED, false)) {
                     final int n = step(sb);
                     if (n > 0) sleep = 100; else if (n < 0) sleep = 3000;
                 }
@@ -156,10 +161,12 @@ public final class AnchorIndexer extends Thread {
     int step(final Switchboard sb) throws Exception {
         final long now = System.currentTimeMillis();
         this.recent.values().removeIf(t -> now - t > RECENT_MS);
-        final int refresh = sb.getConfigInt(SwitchboardConstants.SEARCH_RANKING_ANCHORS_REFRESH_HOURS, 24);
+        final int refresh = sb.getConfigInt(SwitchboardConstants.SEARCH_RANKING_ANCHORS_REFRESH_HOURS, 168);
         final EmbeddedSolrConnector connector = sb.index.fulltext().getDefaultEmbeddedConnector();
         final SolrQuery query = AbstractSolrConnector.getSolrQuery(pendingQuery(refresh), null, 0, BATCH * 2, "id", "_version_", "sku");
-        if (!this.recent.isEmpty()) query.addFilterQuery("*:* AND NOT _query_:\"{!terms f=id}" + String.join(",", this.recent.keySet()) + "\"");
+        query.addFilterQuery(net.yacy.search.vector.VectorIndexer.NO_ERROR_DOCUMENTS);
+        final String skip = net.yacy.search.vector.VectorIndexer.skipFilter(this.recent.keySet());
+        if (skip != null) query.addFilterQuery(skip);
         final SolrDocumentList docs = connector.getDocumentListByParams(query);
         if (docs.isEmpty()) return this.recent.isEmpty() ? 0 : -1;
         final SolrClient solr = connector.getServer();

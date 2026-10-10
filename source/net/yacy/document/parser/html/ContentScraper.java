@@ -544,8 +544,9 @@ public class ContentScraper extends AbstractScraper implements Scraper {
         if (tag.boilerplate || tag.opts == null) return;
         final String role = tag.opts.getProperty("role", EMPTY_STRING).trim().toLowerCase(Locale.ROOT);
         final TagType type = tag.tagType;
-        if (type == TagType.nav || type == TagType.aside || BOILERPLATE_ROLES.contains(role)
-                || (!tag.main && (type == TagType.header || type == TagType.footer || BANNER_ROLES.contains(role)))) {
+        // inside the article, an <aside> is a note or callout of the text; outside it is a sidebar
+        if (type == TagType.nav || BOILERPLATE_ROLES.contains(role)
+                || (!tag.main && (type == TagType.aside || type == TagType.header || type == TagType.footer || BANNER_ROLES.contains(role)))) {
             tag.boilerplate = true;
             return;
         }

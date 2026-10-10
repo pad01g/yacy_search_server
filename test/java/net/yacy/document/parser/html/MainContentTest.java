@@ -105,4 +105,45 @@ public class MainContentTest {
         assertEquals(true, s.getText().contains("ownership works"));
         s.close();
     }
+
+    @Test
+    public void testEndTagInScriptDoesNotCloseThePage() throws IOException {
+        // a template or a string in a script holds end tags: they must not close the elements around the script
+        final ContentScraper s = scrape("<html><body><nav>Menu entries</nav><main><div id='content'><p>" + LONG + "</p>"
+                + "<script>el.innerHTML = '<b>x</b></div></main>'; foo();</script>"
+                + "<script type='text/template'><div class='card'></div></div></script>"
+                + "<p>The second paragraph of the main text continues after the scripts.</p></div></main>"
+                + "<footer>Copyright 2026 Example</footer></body></html>");
+        final String text = s.getText();
+        assertTrue(text, text.contains("ownership works"));
+        assertTrue(text, text.contains("second paragraph"));
+        assertFalse(text, text.contains("foo()"));
+        assertFalse(text, text.contains("Copyright"));
+        assertFalse(text, text.contains("Menu entries"));
+        s.close();
+    }
+
+    @Test
+    public void testAsideInsideTheArticleIsText() throws IOException {
+        final ContentScraper s = scrape("<html><body><aside>Sidebar links</aside><main><article><p>" + LONG + "</p>"
+                + "<aside class='note'>Note: borrowing rules apply here.</aside></article></main></body></html>");
+        final String text = s.getText();
+        assertTrue(text, text.contains("borrowing rules"));
+        assertFalse(text, text.contains("Sidebar links"));
+        s.close();
+    }
+
+    @Test
+    public void testDeepUnclosedElementsStayBounded() throws IOException {
+        final StringBuilder page = new StringBuilder("<html><body><div>");
+        for (int i = 0; i < 5000; i++) page.append("<span>");
+        page.append(LONG);
+        for (int i = 0; i < 5000; i++) page.append("</i>");
+        page.append("</div></body></html>");
+        final long t = System.currentTimeMillis();
+        final ContentScraper s = scrape(page.toString());
+        assertTrue(s.getText().contains("ownership works"));
+        assertTrue("took " + (System.currentTimeMillis() - t) + " ms", System.currentTimeMillis() - t < 10000);
+        s.close();
+    }
 }

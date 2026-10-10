@@ -51,6 +51,10 @@ public final class EmbeddingClient {
                 .followRedirects(HttpClient.Redirect.NEVER).build();
     }
 
+    boolean isFor(final String url, final String model) {
+        return this.url.toString().equals(url) && this.model.equals(model);
+    }
+
     /** @return one unit-length vector per text, in the order of the texts */
     public float[][] embed(final List<String> texts, final Duration timeout) throws IOException {
         if (texts.isEmpty()) return new float[0][];
@@ -65,14 +69,26 @@ public final class EmbeddingClient {
         final HttpResponse<byte[]> res;
         try {
             res = this.http.send(HttpRequest.newBuilder(this.url).timeout(timeout).header("content-type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8)).build(), HttpResponse.BodyHandlers.ofByteArray());
+                    .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8)).build(), limited(MAX_RESPONSE));
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted", e);
         }
         if (res.statusCode() != 200) throw new IOException("embedding service answered HTTP " + res.statusCode());
-        if (res.body().length > MAX_RESPONSE) throw new IOException("embedding answer too large");
+        if (res.body() == null) throw new IOException("embedding answer too large");
         return parse(new String(res.body(), StandardCharsets.UTF_8), texts.size(), this.dimension);
+    }
+
+    /** a body handler that stops reading after max bytes (the body is then null) */
+    private static HttpResponse.BodyHandler<byte[]> limited(final int max) {
+        return info -> HttpResponse.BodySubscribers.mapping(HttpResponse.BodySubscribers.ofInputStream(), in -> {
+            try (java.io.InputStream i = in) {
+                final byte[] b = i.readNBytes(max + 1);
+                return b.length > max ? null : b;
+            } catch (final IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        });
     }
 
     static float[][] parse(final String json, final int expected, final int dimension) throws IOException {

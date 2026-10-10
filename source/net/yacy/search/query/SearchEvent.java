@@ -1035,9 +1035,9 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         // Solr already required this share of the terms (minimum match). The coverage check only sees title, URL and
         // snippets, and can miss a term that Solr matched elsewhere (e.g. beyond the highlighted part of a long text,
         // or in a copy whose snippets were dropped); it must not weigh a result below what Solr guarantees.
-        // Solr counts every query term, also the wildcard and fuzzy ones that the coverage check leaves out; in the
-        // worst case those are among the matched ones.
-        final int clauses = Math.max(coverageTerms.size(), this.query.getQueryGoal().getIncludeSize());
+        // Solr counts every query term as written (a CJK word is one phrase clause, not its bigrams), also the
+        // wildcard and fuzzy ones that the coverage check leaves out; in the worst case those are among the matched.
+        final int clauses = Math.max(coverageTerms.size(), this.query.getQueryGoal().getIncludeStringsSize());
         final double guaranteedCoverage = coverageTerms.isEmpty() ? 1.0d
                 : (double) Math.max(0, QueryParams.requiredTerms(QueryParams.minimumMatch(this.query.getQueryGoal()), clauses) - (clauses - coverageTerms.size()))
                         / coverageTerms.size();
@@ -2176,7 +2176,8 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         // TODO: verify and straighten the use of addTopic, getTopic and getTopicNavigator and related score calculation
         // final long ranking = ((long) (score * 128.f)) + postRanking(resultEntry, this.getTopicNavigator(MAX_TOPWORDS));
 
-        if (Switchboard.getSwitchboard().getConfigBool("search.debug.ranking", false)) log.info("RANKDEBUG " + resultEntry.urlstring() + " score=" + score + " boost=" + rankingBoost + " raw=" + raw + " words=" + resultEntry.wordCountOrUnknown() + " ranking=" + ranking + " kw=" + resultEntry.getFieldValue(VectorSearch.FIELD_KEYWORD_MATCH) + " q=" + currentCandidateQuality(resultEntry) + " local=" + isLocalCandidate(resultEntry));
+        // not for the searches of other peers: their result URLs show what their users searched for
+        if (!this.query.servesRemotePeer() && Switchboard.getSwitchboard().getConfigBool("search.debug.ranking", false)) log.info("RANKDEBUG " + resultEntry.urlstring() + " score=" + score + " boost=" + rankingBoost + " raw=" + raw + " words=" + resultEntry.wordCountOrUnknown() + " ranking=" + ranking + " kw=" + resultEntry.getFieldValue(VectorSearch.FIELD_KEYWORD_MATCH) + " q=" + currentCandidateQuality(resultEntry) + " local=" + isLocalCandidate(resultEntry));
         resultEntry.setScore(ranking); // update the score of resultEntry for access by search interface / api
         this.resultList.put(new ReverseElement<>(resultEntry, ranking)); // remove smallest in case of overflow
         if (this.pollImmediately) this.resultList.poll(); // prevent re-ranking in case there is only a single index source which has already ranked entries.
@@ -2362,6 +2363,10 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
      */
     /** the longest time a local search waits for its remaining results before the first is taken */
     static final long LOCAL_RANKING_WAIT_MS = 2000;
+    /** the Solr batch (localsolroffset) whose results were ranked before the first of them was taken */
+    private int rankedSolrOffset = -1;
+    private volatile long rankingDeadline = 0;
+    private volatile boolean rankingDone = true;
 
     public URIMetadataNode oneResult(final int item, final long timeout) {
         // check if we already retrieved this item
@@ -2418,13 +2423,24 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
             resultListIndex = item - (this.localsolroffset - this.query.itemsPerPage);
         }
         if (!this.remote) {
-            // a local search: rank all local results before the first is taken, so that a better result that
-            // arrives later (snippet threads, the word index) is not placed behind a worse one (within the timeout)
-            final long rankingDeadline = Math.min(finishTime, System.currentTimeMillis() + LOCAL_RANKING_WAIT_MS);
-            while (System.currentTimeMillis() < rankingDeadline) {
-                if (!drainStacksToResult(true)) {
+            // a local search: rank the Solr results of this page before the first is taken, so that a better result
+            // that arrives later (snippet threads) is not placed behind a worse one (within the timeout). One caller
+            // per page drains, the others (the search page asks for the items in parallel) wait for it. Only the Solr
+            // stack: results only the word index found go after all Solr results anyway (wordIndexBand), and
+            // draining it here would start a snippet thread for each of them.
+            final boolean drainer;
+            synchronized (this) {
+                drainer = this.rankedSolrOffset != this.localsolroffset;
+                if (drainer) {
+                    this.rankedSolrOffset = this.localsolroffset;
+                    this.rankingDeadline = Math.min(finishTime, System.currentTimeMillis() + LOCAL_RANKING_WAIT_MS);
+                    this.rankingDone = false;
+                }
+            }
+            while (!this.rankingDone && System.currentTimeMillis() < this.rankingDeadline) {
+                if (!drainer || !drainSolrStackToResult(true)) {
                     // nothing could be taken: done when no feeder (Solr, word index, snippet thread) is still running
-                    if (this.isFeedingFinished() && this.nodeStack.sizeQueue() == 0) break;
+                    if (drainer && this.isFeedingFinished() && this.nodeStack.sizeQueue() == 0) break;
                     try {
                         Thread.sleep(5);
                     } catch (final InterruptedException e) {
@@ -2433,6 +2449,7 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
                     }
                 }
             }
+            if (drainer) this.rankingDone = true;
         }
         while ( this.resultList.sizeAvailable() <= resultListIndex &&
                 (this.rwiQueueSize() > 0 || this.nodeStack.sizeQueue() > 0 ||

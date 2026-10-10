@@ -574,7 +574,7 @@ public class Segment {
     }
 
     /** share of the letters in the script of a declared CJK language at which the declaration is believed */
-    static final double DECLARED_SCRIPT_SHARE = 0.03d;
+    static final double DECLARED_SCRIPT_SHARE = 0.05d;
     /** share of the letters in kana or hangul at which the text is Japanese or Korean without a declaration */
     static final double UNDECLARED_SCRIPT_SHARE = 0.2d;
 

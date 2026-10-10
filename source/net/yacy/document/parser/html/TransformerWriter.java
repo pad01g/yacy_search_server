@@ -283,7 +283,7 @@ public final class TransformerWriter extends Writer {
             return new char[0];
         }
 
-        if (!tagname.equalsIgnoreCase(this.tagStack.lastElement().tagName) && this.isOpen(tagname)) {
+        if (!tagname.equalsIgnoreCase(this.tagStack.lastElement().tagName) && this.isOpenNearby(tagname)) {
             // like browsers, an end tag closes the elements left open inside it (an unclosed <li> in a <nav>, an
             // unclosed <span> in a <div>), so that the element does not extend to the rest of the page
             while (!tagname.equalsIgnoreCase(this.tagStack.lastElement().tagName)) this.filterTagCloseing(quotechar);
@@ -299,8 +299,19 @@ public final class TransformerWriter extends Writer {
         return this.filterTagCloseing(quotechar);
     }
 
-    private boolean isOpen(final String tagname) {
-        for (final ContentScraper.Tag t : this.tagStack) if (tagname.equalsIgnoreCase(t.tagName)) return true;
+    /** end tags close at most this many open elements (the copies of their content grow with the depth) */
+    static final int MAX_AUTO_CLOSE = 64;
+
+    /**
+     * @return true if an element with this name is open within the last {@link #MAX_AUTO_CLOSE} levels and not
+     *         outside a script or style element: there an end tag is text (a template in a script, a string in code)
+     */
+    private boolean isOpenNearby(final String tagname) {
+        for (int i = this.tagStack.size() - 1, depth = 0; i >= 0 && depth < MAX_AUTO_CLOSE; i--, depth++) {
+            final ContentScraper.Tag t = this.tagStack.get(i);
+            if (tagname.equalsIgnoreCase(t.tagName)) return true;
+            if (t.tagType == TagType.script || t.tagType == TagType.style) return false;
+        }
         return false;
     }
 

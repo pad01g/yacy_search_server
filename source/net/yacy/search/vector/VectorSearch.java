@@ -92,9 +92,17 @@ public final class VectorSearch {
         return s == 0 ? model() : model() + " sections=" + s;
     }
 
+    private static volatile EmbeddingClient cachedClient = null;
+
+    /** one client (and its connection pool) per configured service and model */
     static EmbeddingClient client() {
         final Switchboard sb = Switchboard.getSwitchboard();
-        return new EmbeddingClient(sb.getConfig(SwitchboardConstants.SEARCH_VECTOR_URL, ""), model(), DIMENSION);
+        final String url = sb.getConfig(SwitchboardConstants.SEARCH_VECTOR_URL, ""), model = model();
+        final EmbeddingClient c = cachedClient;
+        if (c != null && c.isFor(url, model)) return c;
+        final EmbeddingClient n = new EmbeddingClient(url, model, DIMENSION);
+        cachedClient = n;
+        return n;
     }
 
     /** "query:" or "passage:" from the configuration, followed by one space (the configuration file trims values) */
@@ -300,13 +308,14 @@ public final class VectorSearch {
         order.sort((a, b) -> Double.compare(score.get(b), score.get(a)));
         final SolrDocumentList out = new SolrDocumentList();
         final Set<String> seen = new HashSet<>();
+        final boolean collapse = VersionCollapse.enabled();
         for (final String id : order) {
             if (out.size() >= limit) break;
             final SolrDocument d = docs.get(id);
             // another version or spelling of a better ranked page: the fused list is longer than the page, so the
             // page is still filled
-            final Object url = d.getFieldValue("sku");
-            if (VersionCollapse.enabled && url != null && !seen.add(VersionCollapse.key(url.toString()))) continue;
+            final String key = collapse ? VersionCollapse.key(d) : null;
+            if (key != null && !seen.add(key)) continue;
             d.setField("score", (float) (score.get(id) * scale));
             out.add(d);
         }

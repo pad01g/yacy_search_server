@@ -30,8 +30,11 @@ import org.apache.solr.common.SolrDocumentList;
  */
 public final class VersionCollapse {
 
-    /** see SwitchboardConstants.SEARCH_RANKING_COLLAPSE_VERSIONS */
-    public static volatile boolean enabled = true;
+    /** @return SwitchboardConstants.SEARCH_RANKING_COLLAPSE_VERSIONS (read for each query) */
+    public static boolean enabled() {
+        final net.yacy.search.Switchboard sb = net.yacy.search.Switchboard.getSwitchboard();
+        return sb == null || sb.getConfigBool(net.yacy.search.SwitchboardConstants.SEARCH_RANKING_COLLAPSE_VERSIONS, true);
+    }
 
     /** a path segment that names a version: 3, 3.12, v20.10, 18, current, latest... */
     private static final Pattern VERSION_SEGMENT = Pattern.compile("v?\\d+(\\.\\d+)*|current|latest|stable|dev|devel|master|main|nightly");
@@ -61,26 +64,34 @@ public final class VersionCollapse {
         final StringBuilder sb = new StringBuilder(u.length());
         sb.append(parts[0].toLowerCase(Locale.ROOT).replaceFirst("^www\\.", ""));
         // the last part is the file name (empty for a URL that ends with a slash)
+        parts[parts.length - 1] = INDEX_FILE.matcher(parts[parts.length - 1]).replaceFirst("");
+        // the last named part says which page it is (forum/123/, blog/2024/, page/2/): never a version
+        int name = parts.length - 1;
+        while (name > 0 && parts[name].isEmpty()) name--;
         for (int i = 1; i < parts.length; i++) {
             String p = parts[i];
-            final boolean last = i == parts.length - 1;
-            if (last) {
-                p = INDEX_FILE.matcher(p).replaceFirst("");
-                if (p.isEmpty()) continue;
-            } else if (p.isEmpty()) {
-                continue;
-            } else if (VERSION_SEGMENT.matcher(p.toLowerCase(Locale.ROOT)).matches()) {
-                p = "*";
-            }
+            if (p.isEmpty()) continue;
+            if (i < name && VERSION_SEGMENT.matcher(p.toLowerCase(Locale.ROOT)).matches()) p = "*";
             sb.append('/').append(p);
         }
         return sb.append(query).toString();
     }
 
-    /** @return the URL of a result document (the sku field) */
-    static String url(final SolrDocument d) {
+    /**
+     * @return the key of a result document: its URL key and its title without numbers, so that only copies with the
+     *         same title collapse (pull/12/files and pull/34/files have different titles; the editions of a
+     *         documentation page differ at most by the version number in the title), null without URL
+     */
+    public static String key(final SolrDocument d) {
         final Object sku = d.getFieldValue("sku");
-        return sku == null ? null : sku.toString();
+        if (sku == null) return null;
+        Object title = d.getFieldValue("title");
+        if (title instanceof java.util.Collection) title = ((java.util.Collection<?>) title).isEmpty() ? null : ((java.util.Collection<?>) title).iterator().next();
+        return key(sku.toString()) + "|" + titleKey(title == null ? "" : title.toString());
+    }
+
+    static String titleKey(final String title) {
+        return title.toLowerCase(Locale.ROOT).replaceAll("v?\\d+(\\.\\d+)*", "").replaceAll("\\s+", " ").trim();
     }
 
     /**
@@ -96,8 +107,8 @@ public final class VersionCollapse {
         final Set<String> seen = new HashSet<>();
         for (final SolrDocument d : docs) {
             if (out.size() >= limit) break;
-            final String url = url(d);
-            if (url != null && !seen.add(key(url))) continue;
+            final String k = key(d);
+            if (k != null && !seen.add(k)) continue;
             out.add(d);
         }
         return out;

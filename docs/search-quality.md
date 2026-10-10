@@ -26,6 +26,9 @@ MRR@10（調整用 tune 30 問 / 確認用 heldout 37 問）。設定は tune �
 | キーワードだけ、加点 2 | 0.562 | 0.566 | 0.834 | 0.250 | 0.437 | 46 |
 | ハイブリッド（score、重み 1.0、加点 2） | **0.643** | **0.626** | 0.829 | **0.386** | **0.630** | **54** |
 
+- 敵対的レビューの修正の後（版の集約が題名も比べる、ベクトル検索は管理者の検索だけ、など）に測り直すと、
+  ハイブリッドの tune は 0.626（「rust ownership」の正解が、ベクトルだけで入った頁とほぼ同点で 1 位から 2 位に）、
+  heldout は 0.626 で変わらず。キーワードだけは同じ値。
 - ハイブリッドは、自然文の質問（「run a shell command from python and capture its output」）と日本語の質問で効く。
   キーワードの質問はほぼ変わらない（heldout 0.834 → 0.829）。検索のたびの追加は、質問 1 つの埋め込み（小さな
   モデル）と knn の問い合わせ 1 回。
@@ -82,7 +85,7 @@ flexbox の頁より上に来ていた。`search.ranking.solr.textPhraseBoost` �
 **日本語の頁が英語と判定されていた**: YaCy の統計による判定は空白で区切った語を数えるので、コードや英語の用語を
 含む日本語の頁は英語に見える。それが `.org` などの汎用の TLD（英語とみなされる）と一致すると、頁の
 `<html lang="ja">` より優先されていた。索引では MDN の日本語版の 52%、Python の日本語版の 52%、Pro Git の日本語版の
-48% が `en` だった。頁が日本語・中国語・韓国語を宣言していて、本文の文字の 3% 以上がその文字（かな・漢字、
+48% が `en` だった。頁が日本語・中国語・韓国語を宣言していて、本文の文字の 5% 以上がその文字（かな・漢字、
 漢字、ハングル）なら、宣言を使う（Python の dataclasses の頁は、コードの英字が多く日本語の文字は 8.5%）。宣言が
 誤っている頁（docs.docker.jp は翻訳した頁にも `lang="en"` と書く）のため、かなが文字の 20% 以上なら日本語、
 ハングルが 20% 以上なら韓国語とする。
@@ -115,13 +118,15 @@ flexbox の頁より上に来ていた。`search.ranking.solr.textPhraseBoost` �
 他の頁がその頁へのリンクに付けた文（「HPA」「Pod Disruption Budget」、日本語の頁からの「水平 Pod 自動スケーリング」）
 は、題名に無い呼び方を持っている。`AnchorIndexer` が後ろで集めて `anchors_in_txt` に書き、キーワード検索の項目に
 加えた（`search.ranking.solr.collection.boostfields` の `anchors_in_txt^2.0`）。後から crawl した頁のリンクを拾うため、
-`search.ranking.anchors.refreshHours`（24）ごとに集め直す。
+`search.ranking.anchors.refreshHours`（168）ごとに集め直す。既定では off（`search.ranking.anchors.enabled`）: 1 頁ごとに
+Solr の文書全体を書き直す（atomic update はすべての項目を索引し直す）うえ、この質問集では順位を変えなかった。
 
 ### 8. クリック
 
 検索の画面で結果を開くと `api/click_p.json` に知らせ、同じ質問の次のローカル検索でその頁の点数を最大
 1 + `search.ranking.clicks.weight`（0.5）倍にする（8 回で最大）。記録するのは管理者のクリックだけ（`_p`、POST）で、
-公開の検索画面の訪問者が順位を動かすことはできない。`DATA/WORK/clicks.json` に保存し、他のピアには送らない。
+公開の検索画面の訪問者が順位を動かすことはできない。管理者のブラウザを使った他のサイトからの送信（localhost の
+管理者はパスワード無しで通る）は、ブラウザの `Sec-Fetch-Site` / `Origin` で断る。`DATA/WORK/clicks.json` に保存し、他のピアには送らない。
 評価の質問では測れない（クリックが無い）。
 
 ### 9. 鮮度とサイトマップ

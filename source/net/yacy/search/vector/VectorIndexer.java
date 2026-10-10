@@ -102,16 +102,25 @@ public final class VectorIndexer extends Thread {
         }
     }
 
+    /** load failures are stored as documents too: they have no text to embed */
+    public static final String NO_ERROR_DOCUMENTS = "-failreason_s:[* TO *]";
+
+    /** stop the thread (YaCy shuts down) */
+    public static synchronized void shutdown() {
+        if (instance != null) instance.interrupt();
+    }
+
     /** the query for documents that still need an embedding of this model */
     static String pendingQuery(final String model) {
         return "*:* AND -" + VectorSearch.FIELD_MODEL + ":\"" + model.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     /** the filter that leaves out documents updated just now and documents that failed too often */
-    static String skipFilter(final Collection<String> ids) {
+    public static String skipFilter(final Collection<String> ids) {
         if (ids.isEmpty()) return null;
         // the terms parser has no clause limit; document ids are url hashes (letters, digits, - and _)
-        return "*:* AND NOT _query_:\"{!terms f=id}" + String.join(",", ids) + "\"";
+        // not cached: it changes with every step and would push the filters of the searches out of the filter cache
+        return "{!lucene cache=false}*:* AND NOT _query_:\"{!terms f=id}" + String.join(",", ids) + "\"";
     }
 
     /** @return the number of documents embedded in this step, or -1 when only just updated documents are pending */
@@ -122,7 +131,8 @@ public final class VectorIndexer extends Thread {
         final int sections = VectorSearch.sections();
         final List<String> skip = new ArrayList<>(this.recent.keySet());
         this.failures.forEach((id, n) -> { if (n >= 3) skip.add(id); });
-        final SolrQuery query = AbstractSolrConnector.getSolrQuery(pendingQuery(signature), null, 0, BATCH * 4, "id", "_version_", "title", "description_txt", "text_t");
+        final SolrQuery query = AbstractSolrConnector.getSolrQuery(pendingQuery(signature), null, 0, BATCH * 2, "id", "_version_", "title", "description_txt", "text_t");
+        query.addFilterQuery(NO_ERROR_DOCUMENTS);
         final String fq = skipFilter(skip);
         if (fq != null) query.addFilterQuery(fq);
         final SolrDocumentList docs = sb.index.fulltext().getDefaultEmbeddedConnector().getDocumentListByParams(query);
@@ -176,7 +186,7 @@ public final class VectorIndexer extends Thread {
             this.recent.put(id, now);
         }
         this.embedded.addAndGet(done);
-        if (this.failures.size() > 100000) this.failures.clear();
+        if (this.failures.size() > 10000) this.failures.clear();
         return done;
     }
 

@@ -843,6 +843,7 @@ public class yacysearch {
                     lat, lon, rad,
                     sb.getConfigSet("search.navigation"));
             theQuery.setStrictContentDom(strictContentDom);
+            theQuery.allowVectorSearch(adminAuthenticated || sb.getConfigBool(SwitchboardConstants.SEARCH_VECTOR_PUBLIC, false));
             if (preferLanguage != null) theQuery.preferLanguage(preferLanguage,
                     sb.getConfigFloat(SwitchboardConstants.SEARCH_LANGUAGE_OTHER_WEIGHT, SwitchboardConstants.SEARCH_LANGUAGE_OTHER_WEIGHT_DEFAULT));
             theQuery.setMaxSuggestions(meanMax);

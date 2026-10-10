@@ -52,6 +52,7 @@ public final class ClickStore {
     private final File file;
     private long savedAt = 0;
     private boolean dirty = false;
+    private final Object writeLock = new Object();
 
     ClickStore(final File file) {
         this.file = file;
@@ -149,23 +150,26 @@ public final class ClickStore {
 
     public void save() {
         if (this.file == null) return;
-        final JSONObject json = new JSONObject();
-        synchronized (this.clicks) {
-            if (!this.dirty) return;
-            try {
-                for (final Map.Entry<String, Map<String, Integer>> e : this.clicks.entrySet()) json.put(e.getKey(), new JSONObject(e.getValue()));
-            } catch (final Exception e) {
-                return;
+        // one writer at a time, and the snapshot taken under the same lock: an older snapshot never overwrites a newer
+        synchronized (this.writeLock) {
+            final JSONObject json = new JSONObject();
+            synchronized (this.clicks) {
+                if (!this.dirty) return;
+                try {
+                    for (final Map.Entry<String, Map<String, Integer>> e : this.clicks.entrySet()) json.put(e.getKey(), new JSONObject(e.getValue()));
+                } catch (final Exception e) {
+                    return;
+                }
+                this.dirty = false;
+                this.savedAt = System.currentTimeMillis();
             }
-            this.dirty = false;
-            this.savedAt = System.currentTimeMillis();
-        }
-        try {
-            final File tmp = new File(this.file.getPath() + ".tmp");
-            Files.write(tmp.toPath(), json.toString().getBytes(StandardCharsets.UTF_8));
-            Files.move(tmp.toPath(), this.file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (final IOException e) {
-            ConcurrentLog.warn("ClickStore", "cannot write " + this.file + ": " + e.getMessage());
+            try {
+                final File tmp = new File(this.file.getPath() + ".tmp");
+                Files.write(tmp.toPath(), json.toString().getBytes(StandardCharsets.UTF_8));
+                Files.move(tmp.toPath(), this.file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (final IOException e) {
+                ConcurrentLog.warn("ClickStore", "cannot write " + this.file + ": " + e.getMessage());
+            }
         }
     }
 }

@@ -47,4 +47,31 @@ public class VersionCollapseTest {
         assertEquals(5, c.getNumFound());
         assertEquals(2, VersionCollapse.collapse(l, 2).size());
     }
+
+    @Test
+    public void testTheSegmentThatNamesThePageIsNoVersion() {
+        assertNotEquals(VersionCollapse.key("https://example.org/forum/123/"), VersionCollapse.key("https://example.org/forum/456/"));
+        assertNotEquals(VersionCollapse.key("https://example.org/blog/2023/"), VersionCollapse.key("https://example.org/blog/2024/"));
+        assertNotEquals(VersionCollapse.key("https://example.org/article/1001/index.html"), VersionCollapse.key("https://example.org/article/1002/index.html"));
+        assertNotEquals(VersionCollapse.key("https://example.org/list/page/2/"), VersionCollapse.key("https://example.org/list/page/3/"));
+    }
+
+    @Test
+    public void testOnlyCopiesWithTheSameTitleCollapse() {
+        final SolrDocumentList l = new SolrDocumentList();
+        final String[][] docs = {
+                {"https://github.com/o/r/pull/12/files", "Fix the parser by alice"},
+                {"https://github.com/o/r/pull/34/files", "Add a cache by bob"},
+                {"https://www.postgresql.org/docs/17/routine-vacuuming.html", "PostgreSQL: Documentation: 17: 24.1. Routine Vacuuming"},
+                {"https://www.postgresql.org/docs/current/routine-vacuuming.html", "PostgreSQL: Documentation: 18: 24.1. Routine Vacuuming"}};
+        for (final String[] x : docs) {
+            final SolrDocument d = new SolrDocument();
+            d.setField("sku", x[0]);
+            d.setField("title", java.util.List.of(x[1]));
+            l.add(d);
+        }
+        final SolrDocumentList c = VersionCollapse.collapse(l, 10);
+        assertEquals(3, c.size());
+        assertEquals("https://www.postgresql.org/docs/17/routine-vacuuming.html", c.get(2).getFieldValue("sku"));
+    }
 }

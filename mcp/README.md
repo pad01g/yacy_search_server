@@ -51,6 +51,10 @@ For a peer outside Docker use `-e YACY_URL=http://host.docker.internal:8090` (Li
 | `YACY_TIMEOUT_MS` | `30000` | timeout of one request to the peer |
 | `YACY_ALLOW_TRUST_SETTINGS` | unset | `1`: `set_ranking_setting` may also change `trust.search.acceptUnverified` and `trust.policy.excludeTags` |
 
+On the improved-search fork, the vector search (short questions find pages without the exact words) is used only
+for searches of the peer's administrator or from its host. When the MCP server runs in another container, set
+`search.vector.public=true` on the peer (it then embeds every new query of its search page).
+
 ## Tools
 
 | Tool | What it does |

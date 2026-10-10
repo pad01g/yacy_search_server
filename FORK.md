@@ -33,6 +33,14 @@ docker compose の閉じた P2P 網を立てて測っている（検索品質: u
 
 設定値の説明は `help/RankingSolr_p.md` の "Related Settings Outside This Page" にある。
 
+## ローカル検索の質（本文、順位、言語、版、リンク、クリック、鮮度）
+
+開発者向けの文書の索引（英語と日本語、約 5.8 万頁）と 67 問の質問で、正解が何位に来るかを測って直した。ローカルの
+検索の結果が届いた順に並んでいた不具合、本文の抜き出し（メニューを除く）、本文の連続一致への加点の強さ、
+日本語の頁が英語と判定される不具合、言語の優先、版違いの頁の集約、入ってくるリンクの文、クリック、サイトマップ
+による取り直し。検索のたびのモデルの実行は増やしていない。詳細と測定結果は
+[docs/search-quality.md](docs/search-quality.md)。
+
 ## ピアの身元・信頼・NAT 越え
 
 設計と設定値の一覧は [docs/trust-and-nat.md](docs/trust-and-nat.md)。既定の動作:
@@ -108,7 +116,7 @@ T verify bundle.json freeworld <coordinator の public key>
 キーワード検索は、質問の語が頁に無いと見つけられない（「how to run http server on python without extra dependency」で
 Python の `http.server` の頁が最小一致の 80% に届かず外れていた）。`search.vector.enabled=true` にすると、
 文書に多言語のモデル（intfloat/multilingual-e5-small、384 次元）の埋め込みを付け、ローカルの検索でキーワードの結果と
-意味の近い文書（Solr の knn）を Reciprocal Rank Fusion で合わせる。埋め込みは隣で動かす OpenAI 互換の
+意味の近い文書（Solr の knn）を合わせる（既定はキーワードの点数の割合と類似度を足す `score`。RRF も選べる）。埋め込みは隣で動かす OpenAI 互換の
 `/v1/embeddings` のサービス（`embeddings/`、イメージ `ghcr.io/pad01g/yacy-embeddings`）が計算する。既存の索引も、
 新しく crawl した頁も、埋め込みの無い文書を YaCy が探して書き足す（`_version_` 付きの atomic update）。
 設計と設定は [docs/vector-search.md](docs/vector-search.md)。P2P の他のピアへは広げていない（ローカルの索引だけ）。
@@ -132,7 +140,10 @@ TESTS="net.yacy.document.CJKBigramsTest net.yacy.document.WordTokenizerTest net.
   net.yacy.peers.trust.PeerIdentityTest net.yacy.peers.trust.SeedSignatureTest net.yacy.peers.trust.TrustStoreTest
   net.yacy.peers.trust.ProvenanceTest net.yacy.peers.trust.TrustServiceTest net.yacy.peers.PeerActionsReplayTest
   net.yacy.peers.SeedTest net.yacy.peers.SeedDBTest net.yacy.peers.ProtocolTest net.yacy.htroot.yacy.SearchPeerResolutionTest
-  net.yacy.peers.trust.OwnAddressesTest net.yacy.peers.trust.P2PRouteTest"
+  net.yacy.peers.trust.OwnAddressesTest net.yacy.peers.trust.P2PRouteTest net.yacy.peers.BootstrapPeersTest
+  net.yacy.search.vector.VectorSearchTest net.yacy.search.ranking.VersionCollapseTest net.yacy.search.ranking.ClickStoreTest
+  net.yacy.search.ranking.AnchorIndexerTest net.yacy.document.parser.html.ContentScraperTest
+  net.yacy.document.parser.html.MainContentTest net.yacy.crawler.retrieval.SitemapImporterTest net.yacy.search.index.SegmentLanguageTest"
 ant compile
 FILES="test/java/net/yacy/peers/trust/PeerIdentityTestAccess.java"
 for t in $TESTS; do FILES="$FILES test/java/$(echo $t | tr . /).java"; done

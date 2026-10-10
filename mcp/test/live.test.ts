@@ -39,9 +39,12 @@ test("all tools against a live peer", { skip: !live && "set YACY_URL (and YACY_A
     assert.ok(found.results.length > 0, "the search found nothing");
     const settings = await call("get_ranking_settings");
     const before = settings["search.ranking.thin.words"].value;
-    const changed = await call("set_ranking_setting", { key: "search.ranking.thin.words", value: "123" });
-    assert.equal(changed.after, "123");
-    await call("set_ranking_setting", { key: "search.ranking.thin.words", value: before });
+    try {
+      const changed = await call("set_ranking_setting", { key: "search.ranking.thin.words", value: "123" });
+      assert.equal(changed.after, "123");
+    } finally {
+      await call("set_ranking_setting", { key: "search.ranking.thin.words", value: before });
+    }
     const evaluation = await call("evaluate_ranking", { cases: [{ query, relevant: found.results.slice(0, 2).map((x: { url: string }) => x.url) }], k: 5, waitMs: 3000 });
     console.log("evaluate_ranking", JSON.stringify(evaluation.mean));
     assert.ok(evaluation.mean.recallAtK > 0);
@@ -57,8 +60,14 @@ test("all tools against a live peer", { skip: !live && "set YACY_URL (and YACY_A
       assert.ok(!stopped.crawls.some((c: { handle: string }) => c.handle === mine.handle), "the crawl is gone after stop");
     }
     console.log("list_crawls", (await call("list_crawls")).length);
-    assert.equal((await call("control_crawl", { action: "pause" })).action, "pause");
-    assert.equal((await call("control_crawl", { action: "resume" })).action, "resume");
+    if (process.env.YACY_TEST_CRAWL) {
+      // pausing and resuming would also resume a crawler its owner paused: only with the crawl test
+      try {
+        assert.equal((await call("control_crawl", { action: "pause" })).action, "pause");
+      } finally {
+        assert.equal((await call("control_crawl", { action: "resume" })).action, "resume");
+      }
+    }
     const noHandle = (await client.callTool({ name: "control_crawl", arguments: { action: "stop" } })) as { isError?: boolean };
     assert.ok(noHandle.isError, "stop without a handle is refused");
     if (process.env.YACY_TEST_DELETE) {

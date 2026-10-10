@@ -50,6 +50,8 @@ jobs:
         id: version
         run: |
           v=$(jq -r .version package.json)
+          # the version ends up in shell commands and image tags: only plain semver
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "::error::mcp/package.json version is not semver"; exit 1; }
           test "$(jq -r .version server.json)" = "$v"
           jq -e --arg v "$v" '.packages[0].identifier | endswith(":" + $v)' server.json
           echo "version=$v" >> "$GITHUB_OUTPUT"
@@ -67,9 +69,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: A released version is never overwritten
         if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           # only an explicit "does not exist" lets the release go on; any other error (network, rate limit) stops it
-          image="ghcr.io/pad01g/yacy-search-mcp:${{ steps.version.outputs.version }}"
+          image="ghcr.io/pad01g/yacy-search-mcp:$VERSION"
           if out=$(docker manifest inspect "$image" 2>&1); then
             echo "::error::$image exists already; raise the version (after a failed image build use \"Re-run failed jobs\")"; exit 1
           fi
@@ -146,7 +150,7 @@ jobs:
   mcp-registry:
     needs: [check, images]
     # also when the YaCy or sidecar image failed: the registry only needs the MCP image, checked below
-    if: always() && needs.check.result == 'success' && needs.check.outputs.release == 'true'
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.check.outputs.release == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -157,7 +161,9 @@ jobs:
       PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
     steps:
       - name: The MCP image of this version was pushed
-        run: docker manifest inspect "ghcr.io/pad01g/yacy-search-mcp:${{ needs.check.outputs.version }}" > /dev/null
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: docker manifest inspect "ghcr.io/pad01g/yacy-search-mcp:$VERSION" > /dev/null
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Install mcp-publisher (pinned, checksum verified)
         run: |

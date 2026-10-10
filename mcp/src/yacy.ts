@@ -36,6 +36,17 @@ export function parseChallenge(header: string): Record<string, string> {
 export type Result = { title: string; url: string; snippet: string; verified: boolean | null; trust: string | null; tags: string[] };
 
 /** text from other peers: no markup, no control characters, bounded length */
+/** @return the URL if it is an http(s) URL of at most 2000 characters, else "" (results come from other peers) */
+export function webUrl(u: string): string {
+  if (u.length > 2000) return "";
+  try {
+    const p = new URL(u);
+    return (p.protocol === "http:" || p.protocol === "https:") && !/[\p{Cc}\p{Cf}\s]/u.test(u) ? u : "";
+  } catch {
+    return "";
+  }
+}
+
 export function clean(s: string, max: number): string {
   const t = s
     .replace(/<[^>]*>/g, "")
@@ -80,6 +91,15 @@ export class YaCy {
     return fetch(this.cfg.url + path, { method: init.method ?? "GET", body: init.body, headers: init.headers, signal: this.signal(init.signal) });
   }
 
+  /**
+   * Actions that change the peer (crawls, deletions, settings) need the configured password even when the peer would
+   * accept them without one (adminAccountForLocalhost=true lets every local process act as administrator): the
+   * agent is allowed to change the peer only when its owner configured the MCP server for that.
+   */
+  private requirePassword(): void {
+    if (!this.cfg.password) throw new Error("This action needs the YaCy administrator password: set YACY_ADMIN_PASSWORD (and YACY_ADMIN_USER if it is not 'admin').");
+  }
+
   /** a request to an administrative page: answers the Digest challenge with the configured account */
   async admin(path: string, init: { method?: "GET" | "POST"; body?: URLSearchParams; signal?: AbortSignal } = {}): Promise<Response> {
     const method = init.method ?? "GET";
@@ -91,7 +111,7 @@ export class YaCy {
       return this.fetch(path, init);
     }
     await first.arrayBuffer();
-    if (!this.cfg.password) throw new Error("This action needs the YaCy administrator password: set YACY_ADMIN_PASSWORD (and YACY_ADMIN_USER if it is not 'admin').");
+    this.requirePassword();
     const c = parseChallenge(first.headers.get("www-authenticate") ?? "");
     const target = new URL(this.cfg.url + path);
     const uri = target.pathname + target.search;
@@ -143,7 +163,7 @@ export class YaCy {
       total: Number(channel.totalResults) || 0,
       results: (channel.items ?? []).slice(0, opts.count).map((i) => ({
         title: clean(String(i.title ?? ""), 300),
-        url: String(i.link ?? "").slice(0, 2000),
+        url: webUrl(String(i.link ?? "")),
         snippet: clean(String(i.description ?? ""), 500),
         verified: i.verified === undefined ? null : i.verified === "true",
         trust: i.trust ? clean(i.trust, 20) : null,
@@ -154,6 +174,7 @@ export class YaCy {
 
   // ---- crawling and status
   async crawl(url: string, depth: number, range: "domain" | "subpath" | "wide", maxPages: number, signal?: AbortSignal): Promise<string> {
+    this.requirePassword();
     const params = new URLSearchParams({
       crawlingstart: "",
       crawlingMode: "url",
@@ -192,6 +213,7 @@ export class YaCy {
 
   /** pause or resume the local crawler queue, or stop one crawl (removes its queued URLs; indexed pages stay) */
   async crawlControl(action: "pause" | "resume" | "stop", handle: string | undefined, signal?: AbortSignal): Promise<void> {
+    this.requirePassword();
     const params =
       action === "pause" ? new URLSearchParams({ pause: "localcrawler" })
       : action === "resume" ? new URLSearchParams({ continue: "localcrawler" })
@@ -203,6 +225,7 @@ export class YaCy {
 
   /** remove one URL from this peer's index (full text and word index); returns YaCy's message */
   async deleteDocument(url: string, signal?: AbortSignal): Promise<string> {
+    this.requirePassword();
     const page = await this.admin("/IndexControlURLs_p.html", { signal });
     await page.arrayBuffer();
     const token = page.headers.get("x-yacy-transaction-token");
@@ -224,6 +247,7 @@ export class YaCy {
   }
 
   async setSetting(key: string, value: string, signal?: AbortSignal): Promise<string | null> {
+    this.requirePassword();
     const page = await this.admin("/ConfigProperties_p.html", { signal });
     await page.arrayBuffer();
     const token = page.headers.get("x-yacy-transaction-token");

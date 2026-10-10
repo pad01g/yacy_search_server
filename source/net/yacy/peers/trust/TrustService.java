@@ -182,8 +182,12 @@ public final class TrustService {
             if (fetched >= MAX_GOSSIP_FETCHES) break;
             final String ip = s.getIP();
             if (ip == null && !s.isRelayed()) continue;
+            // the address of a seed is not signed: only ask at an address where the key owner answered, so that a
+            // seed cannot make this peer send requests to any host
+            final String base = s.getPublicURL(ip, false);
+            if (!ProvenAddresses.isProvenAt(s, base)) continue;
             try {
-                final int n = importFrom(store, s.getPublicURL(ip, false) + "/yacy/trust.json", "peer " + s.getName());
+                final int n = importFrom(store, base + "/yacy/trust.json", "peer " + s.getName());
                 if (n <= 0) gossipBackoff.put(s.hash, now + GOSSIP_BACKOFF);
                 fetched++;
             } catch (final RuntimeException e) {

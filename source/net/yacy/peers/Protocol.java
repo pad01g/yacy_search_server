@@ -138,6 +138,7 @@ import net.yacy.search.vector.VectorSearch;
 import net.yacy.search.index.Segment;
 import net.yacy.search.query.SearchEvent;
 import net.yacy.search.query.SecondarySearchSuperviser;
+import net.yacy.search.schema.CollectionConfiguration;
 import net.yacy.search.schema.CollectionSchema;
 import net.yacy.search.snippet.TextSnippet;
 import net.yacy.server.serverCore;
@@ -637,6 +638,7 @@ public final class Protocol {
                     + Seed.addressProfile(target.getIPs()) + ", localAddressProfile="
                     + Seed.addressProfile(event.peers.mySeed().getIPs()));
         }
+        String contactedBaseURL = null;
         for (String ip: target.getIPs()) {
             //if (ip.indexOf(':') >= 0) System.out.println("Search target: IPv6: " + ip);
             final String targetBaseURL;
@@ -666,6 +668,7 @@ public final class Protocol {
                         targetBaseURL,
                         secondarySearchSuperviser
                         );
+                contactedBaseURL = targetBaseURL;
                 break;
             } catch (final IOException e ) {
                 Network.log.info("SEARCH failed, Peer: " + target.hash + ":" + target.getName() + " (" + e.getMessage() + ")");
@@ -685,7 +688,7 @@ public final class Protocol {
         final long totalrequesttime = System.currentTimeMillis() - timestamp;
 
         try {
-            remoteSearchProcess(event, count, totalrequesttime, wordhashes, target, blacklist, result);
+            remoteSearchProcess(event, count, totalrequesttime, wordhashes, target, contactedBaseURL, blacklist, result);
         } catch (final SpaceExceededException e) {
             ConcurrentLog.logException(e);
             return -1;
@@ -736,6 +739,7 @@ public final class Protocol {
         final long timestamp = System.currentTimeMillis();
         event.addExpectedRemoteReferences(count);
         SearchResult result = null;
+        String contactedBaseURL = null;
         for (String ip: target.getIPs()) {
             final String targetBaseURL = target.getPublicURL(ip,
                     Switchboard.getSwitchboard().getConfigBool(SwitchboardConstants.REMOTESEARCH_HTTPS_PREFERRED,
@@ -759,6 +763,7 @@ public final class Protocol {
                         targetBaseURL,
                         null
                         );
+                contactedBaseURL = targetBaseURL;
                 break;
             } catch (final IOException e ) {
                 Network.log.info("SEARCH failed, Peer: " + target.hash + ":" + target.getName() + " (" + e.getMessage() + ")");
@@ -778,7 +783,7 @@ public final class Protocol {
         final long totalrequesttime = System.currentTimeMillis() - timestamp;
 
         try {
-            remoteSearchProcess(event, count, totalrequesttime, wordhashes, target, blacklist, result);
+            remoteSearchProcess(event, count, totalrequesttime, wordhashes, target, contactedBaseURL, blacklist, result);
         } catch (final SpaceExceededException e) {
             ConcurrentLog.logException(e);
             return -1;
@@ -792,6 +797,7 @@ public final class Protocol {
         final long time,
         final String wordhashes,
         final Seed target,
+        final String contactedBaseURL,
         final Blacklist blacklist,
         final SearchResult result
         ) throws SpaceExceededException, InterruptedException {
@@ -874,11 +880,11 @@ public final class Protocol {
                 continue;
             }
             urlEntry.setTrustVerdict(verdict);
-            if (!Provenance.keepSnippet(verdict, target)) {
+            if (!Provenance.keepSnippet(verdict, target, contactedBaseURL)) {
                 urlEntry.setSnippet(null);
                 urlEntry.stripUnsignedContent();
             }
-            final boolean store = Provenance.isFromAuthor(verdict, target);
+            final boolean store = Provenance.isFromAuthor(verdict, target, contactedBaseURL);
             if (store) storable.add(urlEntry);
 
             // passed all checks, store url
@@ -1364,6 +1370,7 @@ public final class Protocol {
         Map<String, LinkedHashSet<String>> snippets = new HashMap<String, LinkedHashSet<String>>(); // this will be a list of urlhash-snippet entries
         final QueryResponse[] rsp = new QueryResponse[]{null};
         final SolrDocumentList[] docList = new SolrDocumentList[]{null};
+        final String[] contactedBaseURL = new String[]{null}; // the URL the remote request went to
         {// encapsulate expensive solr QueryResponse object
             if (localsearch && !Switchboard.getSwitchboard().getConfigBool(SwitchboardConstants.DEBUG_SEARCH_REMOTE_SOLR_TESTLOCAL, false)) {
                 // search the local index
@@ -1429,6 +1436,7 @@ public final class Protocol {
                         return -1;
                     }
                     final int solrtimeout = Switchboard.getSwitchboard().getConfigInt(SwitchboardConstants.FEDERATED_SERVICE_SOLR_INDEXING_TIMEOUT, 6000);
+                    contactedBaseURL[0] = targetBaseURL;
                     SolrRequestTask remoteRequest = new SolrRequestTask(solrQuery, targetBaseURL, target, myseed, solrtimeout, rsp, docList);
                     remoteRequest.start();
                     remoteRequest.join(solrtimeout); // just wait until timeout appears
@@ -1585,7 +1593,7 @@ public final class Protocol {
                 continue;
             }
             urlEntry.setTrustVerdict(verdict);
-            if (localsearch || Provenance.keepSnippet(verdict, target)) {
+            if (localsearch || Provenance.keepSnippet(verdict, target, contactedBaseURL[0])) {
                 keepSnippets.add(ASCII.String(urlEntry.hash()));
             } else {
                 // text, description and highlighting of a copy held by an untrusted peer are not signed
@@ -1597,10 +1605,15 @@ public final class Protocol {
 
                 // put the remote documents to the local index. We must convert the solr document to a solr input document:
                 // only documents of the answering peer itself, other copies may carry altered unsigned fields
-                if (event.addResultsToLocalIndex && Provenance.isFromAuthor(verdict, target)) {
+                // The copy must keep the author signature (without provenance_s in the schema it would be dropped) and is
+                // marked as coming from other peers: an unsigned document outside "dht" counts as this peer's own.
+                final CollectionConfiguration conf = event.query.getSegment().fulltext().getDefaultConfiguration();
+                if (event.addResultsToLocalIndex && conf.contains(CollectionSchema.provenance_s) && Provenance.isFromAuthor(verdict, target, contactedBaseURL[0])) {
                     /* Check document size, only if a limit is set on remote documents size allowed to be stored to local index */
                     if (checkDocumentSize(tmpdoc, event.getRemoteDocStoredMaxSize() * 1024)) {
-                        final SolrInputDocument sid = event.query.getSegment().fulltext().getDefaultConfiguration().toSolrInputDocument(tmpdoc);
+                        final SolrInputDocument sid = conf.toSolrInputDocument(tmpdoc);
+                        final java.util.Collection<Object> collections = sid.getFieldValues(CollectionSchema.collection_sxt.getSolrFieldName());
+                        if (collections == null || !collections.contains("dht")) sid.addField(CollectionSchema.collection_sxt.getSolrFieldName(), "dht");
 
                         // the input document stays untouched because it contains top-level cloned objects
                         docs.add(sid);

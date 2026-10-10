@@ -14,11 +14,15 @@
 
 package net.yacy.peers.trust;
 
+import java.net.MalformedURLException;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import com.google.common.net.InetAddresses;
 
+import net.yacy.cora.document.id.MultiProtocolURL;
+import net.yacy.cora.protocol.Domains;
 import net.yacy.peers.Seed;
 
 /**
@@ -30,7 +34,15 @@ import net.yacy.peers.Seed;
 public final class ProvenAddresses {
 
     private static final int MAX_ENTRIES = 20000;
-    private static final Map<String, String> proven = new ConcurrentHashMap<>();
+    /** the least recently used entries go first (clearing all at the limit would let new keys wipe every proof) */
+    private static final Map<String, String> proven = Collections.synchronizedMap(new LinkedHashMap<String, String>(256, 0.75f, true) {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        protected boolean removeEldestEntry(final Map.Entry<String, String> eldest) {
+            return size() > MAX_ENTRIES;
+        }
+    });
 
     private ProvenAddresses() {
     }
@@ -38,19 +50,41 @@ public final class ProvenAddresses {
     /** remember that the owner of the seed with this hash answered at this IP */
     public static void prove(final String hash, final String ip) {
         if (hash == null || ip == null) return;
-        if (proven.size() >= MAX_ENTRIES) proven.clear();
         proven.put(hash, normalize(ip));
     }
 
-    /** @return true if answers of this peer, as we will contact it now, come from the owner of its key */
-    public static boolean isProven(final Seed seed) {
-        if (seed == null) return false;
+    /**
+     * @param contactedBaseURL the URL the request went to (a seed may list several addresses, and only the address that
+     *        answered matters: an address listed next to a proven one may belong to somebody else)
+     * @return true if the answer of this peer at this URL came from the owner of its key
+     */
+    public static boolean isProvenAt(final Seed seed, final String contactedBaseURL) {
+        if (seed == null || contactedBaseURL == null) return false;
         if (PeerIdentity.isMine(seed.hash)) return true;
-        if (seed.isRelayed()) return seed.isSigned() && P2PRoute.baseURL(seed) != null; // libp2p authenticates the key
+        final MultiProtocolURL url;
+        try {
+            url = new MultiProtocolURL(contactedBaseURL);
+        } catch (final MalformedURLException e) {
+            return false;
+        }
+        if (P2PRoute.isRouted(url)) {
+            // libp2p authenticates the key, if the tunnel is the one of this peer
+            final String route = seed.isRelayed() && seed.isSigned() ? P2PRoute.baseURL(seed) : null;
+            return route != null && sameEndpoint(route, url);
+        }
         final String ip = proven.get(seed.hash);
         if (ip == null) return false;
-        for (final String s : seed.getIPs()) if (ip.equals(normalize(s))) return true;
-        return false;
+        final String host = Domains.stripToHostName(url.getHost());
+        return host != null && ip.equals(normalize(host));
+    }
+
+    private static boolean sameEndpoint(final String baseURL, final MultiProtocolURL url) {
+        try {
+            final MultiProtocolURL b = new MultiProtocolURL(baseURL);
+            return b.getPort() == url.getPort() && b.getHost().equals(url.getHost());
+        } catch (final MalformedURLException e) {
+            return false;
+        }
     }
 
     static String normalize(final String ip) {

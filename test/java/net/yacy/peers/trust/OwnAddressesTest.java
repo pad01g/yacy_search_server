@@ -45,4 +45,20 @@ public class OwnAddressesTest {
         assertEquals("2001:0db8:0001::/48", OwnAddresses.network("[2001:db8:1:2::5]"));
         assertEquals("2001:db8::1", OwnAddresses.canonical("2001:0db8:0:0::1"));
     }
+
+    @Test
+    public void testOneKeyCannotEvictConfirmedAddresses() {
+        OwnAddresses.clear();
+        final long now = System.currentTimeMillis();
+        OwnAddresses.report("203.0.113.9", "T1", "198.51.100.7", now);
+        OwnAddresses.report("203.0.113.9", "T2", "198.51.100.8", now);
+        OwnAddresses.report("203.0.113.9", "T3", "192.0.2.4", now);
+        // one key reports many made-up addresses: it keeps one vote
+        for (int i = 0; i < 1000; i++) OwnAddresses.report("198.18.0." + (i % 250), "EVIL", "192.0.2.99", now);
+        assertTrue(OwnAddresses.confirmed(now).contains("203.0.113.9"));
+        // many keys: the reports of the confirmed address stay
+        for (int i = 0; i < 1000; i++) OwnAddresses.report("198.18.1." + (i % 250), "SYBIL" + i, "192.0.2.99", now);
+        assertTrue(OwnAddresses.confirmed(now).contains("203.0.113.9"));
+        OwnAddresses.clear();
+    }
 }

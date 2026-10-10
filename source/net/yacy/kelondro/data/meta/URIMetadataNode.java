@@ -106,20 +106,23 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
      * @param collection collection origin (e.g. "dht")
      * @throws MalformedURLException
      */
+    /** longest decoded text field accepted from another peer (the fields are gzip compressed: no unbounded inflation) */
+    private static final int MAX_REMOTE_FIELD_CHARS = 65536;
+
     public URIMetadataNode(final Properties prop, String collection) throws MalformedURLException {
         // generates an plasmaLURLEntry using the properties from the argument
         // the property names must correspond to the one from toString
         //System.out.println("DEBUG-ENTRY: prop=" + prop.toString());
         super();
-        final String urlRaw = crypt.simpleDecode(prop.getProperty("url", ""));
+        final String urlRaw = crypt.simpleDecode(prop.getProperty("url", ""), 4096);
         this.url = new DigestURL(urlRaw);
-        String descr = crypt.simpleDecode(prop.getProperty("descr", "")); if (descr == null) descr = "";
-        String dc_creator = crypt.simpleDecode(prop.getProperty("author", "")); if (dc_creator == null) dc_creator = "";
-        String tags = crypt.simpleDecode(prop.getProperty("tags", "")); if (tags == null) tags = "";
+        String descr = crypt.simpleDecode(prop.getProperty("descr", ""), MAX_REMOTE_FIELD_CHARS); if (descr == null) descr = "";
+        String dc_creator = crypt.simpleDecode(prop.getProperty("author", ""), MAX_REMOTE_FIELD_CHARS); if (dc_creator == null) dc_creator = "";
+        String tags = crypt.simpleDecode(prop.getProperty("tags", ""), MAX_REMOTE_FIELD_CHARS); if (tags == null) tags = "";
         this.keywords = Tagging.cleanTagFromAutotagging(tags);
-        String dc_publisher = crypt.simpleDecode(prop.getProperty("publisher", "")); if (dc_publisher == null) dc_publisher = "";
-        String lons = crypt.simpleDecode(prop.getProperty("lon"));
-        String lats = crypt.simpleDecode(prop.getProperty("lat"));
+        String dc_publisher = crypt.simpleDecode(prop.getProperty("publisher", ""), MAX_REMOTE_FIELD_CHARS); if (dc_publisher == null) dc_publisher = "";
+        String lons = crypt.simpleDecode(prop.getProperty("lon"), MAX_REMOTE_FIELD_CHARS);
+        String lats = crypt.simpleDecode(prop.getProperty("lat"), MAX_REMOTE_FIELD_CHARS);
 
         this.setField(CollectionSchema.title.name(), descr);
         this.setField(CollectionSchema.author.name(), dc_creator);
@@ -135,7 +138,7 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
         this.setField(CollectionSchema.size_i.name(), Integer.parseInt(prop.getProperty("size", "0")));
         this.setField(CollectionSchema.wordcount_i.name(), Integer.parseInt(prop.getProperty("wc", "0")));
         final String dt = prop.getProperty("dt", "t");
-        final String mime = crypt.simpleDecode(prop.getProperty("mime")); // optional included if it is not equal to doctype2mime()
+        final String mime = crypt.simpleDecode(prop.getProperty("mime"), MAX_REMOTE_FIELD_CHARS); // optional included if it is not equal to doctype2mime()
         if (mime != null && !mime.isEmpty() && Response.docType(mime) == dt.charAt(0)) { // use supplied mime (if docType(mime) is equal it's a known valid mime)
             this.setField(CollectionSchema.content_type.name(), mime);
         } else {
@@ -151,9 +154,9 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
         this.audioc = Integer.parseInt(prop.getProperty("laudio", "0"));
         this.videoc = Integer.parseInt(prop.getProperty("lvideo", "0"));
         this.appc = Integer.parseInt(prop.getProperty("lapp", "0"));
-        this.snippet = crypt.simpleDecode(prop.getProperty("snippet", ""));
+        this.snippet = crypt.simpleDecode(prop.getProperty("snippet", ""), MAX_REMOTE_FIELD_CHARS);
         // author signature (see docs/trust-and-nat.md)
-        final String prov = crypt.simpleDecode(prop.getProperty("prov", ""));
+        final String prov = crypt.simpleDecode(prop.getProperty("prov", ""), Provenance.MAX_LENGTH);
         if (prov != null && !prov.isEmpty() && prov.length() <= Provenance.MAX_LENGTH) this.setField(CollectionSchema.provenance_s.name(), prov);
         // this.score = Float.parseFloat(prop.getProperty("score", "0.0")); // we don't use the remote rwi ranking but the local rwi ranking profile
         List<String> cs = new ArrayList<String>();
@@ -164,7 +167,7 @@ public class URIMetadataNode extends SolrDocument /* implements Comparable<URIMe
             this.word = new WordReferenceVars(new WordReferenceRow(Base64Order.enhancedCoder.decodeString(prop.getProperty("wi", ""))), false);
         }
         if (prop.containsKey("favicon")) {
-        	final String rawFaviconURL = crypt.simpleDecode(prop.getProperty("favicon", ""));
+        	final String rawFaviconURL = crypt.simpleDecode(prop.getProperty("favicon", ""), MAX_REMOTE_FIELD_CHARS);
         	DigestURL faviconURL = new DigestURL(rawFaviconURL);
         	this.setIconsFields(faviconURL);
         }

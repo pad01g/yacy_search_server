@@ -16,8 +16,8 @@ package net.yacy.peers.trust;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -29,21 +29,23 @@ import com.google.common.net.InetAddresses;
  * its public address on an interface). The "yourip" field and the signed "challengeFor" of one hello answer are no
  * evidence: a peer that relays our request to another peer chooses what the other peer sees. An address counts as
  * ours only after peers with {@value #MIN_PEERS} different keys, reached at {@value #MIN_NETWORKS} different networks
- * (/24 for IPv4, /48 for IPv6, the whole address for local ranges), reported it within {@link #WINDOW}. Both address
- * families are kept, so that a dual-stack peer stays proven over IPv4 after a hello over IPv6.
+ * (/24 for IPv4, /48 for IPv6, the whole address for local ranges), reported it within {@link #WINDOW}. A key has one
+ * vote per address family, its latest report, so that one key cannot fill the table with made-up addresses; with
+ * both families a dual-stack peer stays proven over IPv4 after a hello over IPv6.
  */
 public final class OwnAddresses {
 
     static final int MIN_PEERS = 3;
     static final int MIN_NETWORKS = 2;
     static final long WINDOW = 6L * 60L * 60L * 1000L;
-    private static final int MAX_ADDRESSES = 64;
-    private static final int MAX_REPORTS = 32;
+    /** reporting keys remembered; each key has one vote (its latest report), so one key cannot push others out */
+    static final int MAX_REPORTERS = 256;
 
-    /** a report: the peer that answered and the network at which we reached it */
-    private record Report(String peer, String network, long time) {}
+    /** a report: the address the peer saw, the network at which we reached it */
+    private record Report(String address, String network, long time) {}
 
-    private static final Map<String, Map<String, Report>> reports = new LinkedHashMap<>(16, 0.75f, true);
+    /** reporting peer (key hash and address family) -> its latest report */
+    private static final Map<String, Report> reports = new LinkedHashMap<>(64, 0.75f, false);
 
     private OwnAddresses() {
     }
@@ -53,25 +55,36 @@ public final class OwnAddresses {
         final String a = canonical(address);
         final String network = network(targetIp);
         if (a == null || network == null || peerHash == null) return;
-        final Map<String, Report> r = reports.computeIfAbsent(a, k -> new LinkedHashMap<>());
-        r.put(peerHash, new Report(peerHash, network, now));
-        while (r.size() > MAX_REPORTS) r.remove(r.keySet().iterator().next());
-        while (reports.size() > MAX_ADDRESSES) reports.remove(reports.keySet().iterator().next());
+        // one vote per key and address family (a dual-stack peer is seen over both)
+        final String voter = peerHash + (a.indexOf(':') >= 0 ? "|6" : "|4");
+        reports.remove(voter); // re-insert at the end: the oldest reports come first
+        reports.put(voter, new Report(a, network, now));
+        if (reports.size() > MAX_REPORTERS) {
+            // make room with a report of an address that is not confirmed, so that new keys cannot evict the
+            // reports that prove our real address; the oldest report only if all are confirmed
+            final Set<String> ok = confirmed(now);
+            String victim = null;
+            for (final Map.Entry<String, Report> e : reports.entrySet()) {
+                if (!ok.contains(e.getValue().address())) {
+                    victim = e.getKey();
+                    break;
+                }
+            }
+            reports.remove(victim != null ? victim : reports.keySet().iterator().next());
+        }
     }
 
     /** the addresses that enough independent peers reported recently */
     public static synchronized Set<String> confirmed(final long now) {
+        reports.values().removeIf(r -> r.time() < now - WINDOW);
+        final Map<String, Set<String>> peers = new HashMap<>(), networks = new HashMap<>();
+        for (final Map.Entry<String, Report> e : reports.entrySet()) {
+            peers.computeIfAbsent(e.getValue().address(), k -> new HashSet<>()).add(e.getKey().substring(0, e.getKey().length() - 2));
+            networks.computeIfAbsent(e.getValue().address(), k -> new HashSet<>()).add(e.getValue().network());
+        }
         final Set<String> out = new HashSet<>();
-        for (final Iterator<Map.Entry<String, Map<String, Report>>> i = reports.entrySet().iterator(); i.hasNext();) {
-            final Map.Entry<String, Map<String, Report>> e = i.next();
-            e.getValue().values().removeIf(r -> r.time() < now - WINDOW);
-            if (e.getValue().isEmpty()) {
-                i.remove();
-                continue;
-            }
-            final Set<String> networks = new HashSet<>();
-            for (final Report r : e.getValue().values()) networks.add(r.network());
-            if (e.getValue().size() >= MIN_PEERS && networks.size() >= MIN_NETWORKS) out.add(e.getKey());
+        for (final Map.Entry<String, Set<String>> e : peers.entrySet()) {
+            if (e.getValue().size() >= MIN_PEERS && networks.get(e.getKey()).size() >= MIN_NETWORKS) out.add(e.getKey());
         }
         return out;
     }

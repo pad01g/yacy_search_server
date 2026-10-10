@@ -616,6 +616,17 @@ public class Seed implements Cloneable, Comparable<Seed>, Comparator<Seed>
     }
     
     /**
+     * Keep only this address: the one at which the owner of the seed key answered a back-ping. The other addresses
+     * of a seed are not signed and may belong to somebody else.
+     */
+    public final void setOnlyIP(String ip) {
+        ip = Domains.chopZoneID(ip);
+        if (!isProperIP(ip)) return;
+        this.dna.put(Seed.IP, ip);
+        this.dna.put(Seed.IP6, "");
+    }
+
+    /**
      * set the Peer ip.
      * IPv4 stays the preferred primary address in the legacy IP field. IPv6 is added to IP6
      * when a primary address already exists, while IPv6-only peers can still use IP as their

@@ -217,10 +217,13 @@ public final class Provenance {
         return new Verdict(Status.SELF, null, null, null);
     }
 
-    /** @return true if the peer that sent the result wrote the document and is trusted */
-    public static boolean isFromAuthor(final Verdict v, final net.yacy.peers.Seed answering) {
+    /**
+     * @param contactedBaseURL the URL the request went to
+     * @return true if the peer that sent the result wrote the document and is trusted
+     */
+    public static boolean isFromAuthor(final Verdict v, final net.yacy.peers.Seed answering, final String contactedBaseURL) {
         return v != null && answering != null && v.authorHash != null && v.authorHash.equals(answering.hash)
-                && v.isTrusted() && isTrustedPeer(answering) && ProvenAddresses.isProven(answering);
+                && v.isTrusted() && isTrustedPeer(answering) && ProvenAddresses.isProvenAt(answering, contactedBaseURL);
     }
 
     /** @return true if the peer is in the trust set, or signed when no coordinator is configured */
@@ -236,11 +239,12 @@ public final class Provenance {
     /**
      * The snippet of a result is not signed. Keep it only if the peer that answered wrote the document or is trusted.
      * @param answering the peer that sent the result, null for the own index
+     * @param contactedBaseURL the URL the request went to
      */
-    public static boolean keepSnippet(final Verdict v, final net.yacy.peers.Seed answering) {
+    public static boolean keepSnippet(final Verdict v, final net.yacy.peers.Seed answering, final String contactedBaseURL) {
         if (answering == null) return true;
         // the address of a seed is not signed: only believe that the owner answered at a proven address
-        if (!ProvenAddresses.isProven(answering)) return false;
+        if (!ProvenAddresses.isProvenAt(answering, contactedBaseURL)) return false;
         if (v != null && v.authorHash != null && v.authorHash.equals(answering.hash)) return true;
         return isTrustedPeer(answering);
     }

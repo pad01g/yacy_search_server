@@ -49,6 +49,8 @@ public final class TrustStore {
     public static final String BUNDLE_FILE = "DATA/SETTINGS/trust-bundle.json";
     /** stop storing envelopes beyond this number (protection against flooding) */
     static final int MAX_ENVELOPES = 512;
+    /** envelopes read from one bundle; a bundle of this peer's network holds at most MAX_ENVELOPES */
+    static final int MAX_BUNDLE_ENVELOPES = 2 * MAX_ENVELOPES;
     static final int MAX_PEERS_PER_LIST = 10000;
     /** versions above this are rejected, so that sums of versions cannot overflow */
     static final long MAX_VERSION = 1L << 40;
@@ -165,19 +167,34 @@ public final class TrustStore {
             ConcurrentLog.info("TrustStore", "ignoring malformed trust bundle: " + e.getMessage());
             return 0;
         }
-        // delegations first, so that the lists of newly delegated operators are accepted in the same import
-        final List<TrustEnvelope> parsed = new ArrayList<>();
-        for (final JSONObject c : candidates) {
-            final TrustEnvelope e = TrustEnvelope.parse(c);
-            if (e != null) parsed.add(e);
-        }
-        parsed.sort((a, b) -> Boolean.compare(TrustEnvelope.TYPE_PEERLIST.equals(a.type), TrustEnvelope.TYPE_PEERLIST.equals(b.type)));
+        // Only envelopes whose signer may be stored are verified (a bundle from a stranger may hold thousands of
+        // self-signed envelopes): the coordinators' first, delegations before lists, so that the lists of newly
+        // delegated operators are accepted in the same import; then the operators'.
+        if (candidates.size() > MAX_BUNDLE_ENVELOPES) candidates.subList(MAX_BUNDLE_ENVELOPES, candidates.size()).clear();
+        final List<String> coords = this.coordinators.get();
         int changed = 0;
-        for (final TrustEnvelope e : parsed) {
-            if (add(e)) changed++;
+        for (final boolean coordinatorRound : new boolean[] {true, false}) {
+            final List<TrustEnvelope> parsed = new ArrayList<>();
+            for (final JSONObject c : candidates) {
+                final String signer = canonicalKey(c.optString("signer", null));
+                if (signer == null || coords.contains(signer) != coordinatorRound) continue;
+                if (!coordinatorRound && !isDelegated(signer)) continue;
+                final TrustEnvelope e = TrustEnvelope.parse(c);
+                if (e != null) parsed.add(e);
+            }
+            parsed.sort((a, b) -> Boolean.compare(TrustEnvelope.TYPE_PEERLIST.equals(a.type), TrustEnvelope.TYPE_PEERLIST.equals(b.type)));
+            for (final TrustEnvelope e : parsed) {
+                if (add(e)) changed++;
+            }
         }
         if (changed > 0 && save) save();
         return changed;
+    }
+
+    /** @return true if a coordinator delegated to this operator key (revoked or not: add() decides) */
+    private synchronized boolean isDelegated(final String operator) {
+        for (final Map<String, TrustEnvelope> byOperator : this.delegations.values()) if (byOperator.containsKey(operator)) return true;
+        return false;
     }
 
     /**

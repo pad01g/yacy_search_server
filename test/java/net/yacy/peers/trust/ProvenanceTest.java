@@ -219,12 +219,19 @@ public class ProvenanceTest {
         SeedSignature.sign(seed, other);
         final Provenance.Verdict fromOther = new Provenance.Verdict(Provenance.Status.TRUSTED, other.peerHash(), null, null);
         ProvenAddresses.clear();
-        assertFalse(Provenance.keepSnippet(fromOther, seed));
+        assertFalse(Provenance.keepSnippet(fromOther, seed, "http://192.0.2.5:8090"));
         ProvenAddresses.prove(other.peerHash(), "192.0.2.5");
-        assertTrue(Provenance.keepSnippet(fromOther, seed));
+        assertTrue(Provenance.keepSnippet(fromOther, seed, "http://192.0.2.5:8090"));
         // a copy of the seed that points somewhere else is not proven
+        assertFalse(Provenance.keepSnippet(fromOther, seed, "http://198.51.100.9:8090"));
+        // nor is an address listed next to the proven one: only the address that answered counts
         seed.setIP("198.51.100.9");
-        assertFalse(Provenance.keepSnippet(fromOther, seed));
+        seed.setIP("2001:db8::5");
+        assertTrue(seed.getIPs().contains("198.51.100.9"));
+        ProvenAddresses.prove(other.peerHash(), "2001:db8::5");
+        assertFalse(Provenance.keepSnippet(fromOther, seed, "http://198.51.100.9:8090"));
+        assertTrue(Provenance.keepSnippet(fromOther, seed, "http://[2001:db8::5]:8090"));
+        assertFalse(Provenance.keepSnippet(fromOther, seed, null));
         ProvenAddresses.clear();
     }
 

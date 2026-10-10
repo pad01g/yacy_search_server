@@ -60,7 +60,7 @@ public final class VectorSearch {
             return size() > 512;
         }
     });
-    private static volatile long failedAt = 0;
+    private static volatile long failedUntil = 0;
 
     private VectorSearch() {
     }
@@ -186,20 +186,24 @@ public final class VectorSearch {
 
     /**
      * @return the embedding of a query, or null if the service is not available or does not answer within
-     *         {@link #QUERY_TIMEOUT_MS} (then the search uses keywords only; after a failure the service is not asked
-     *         again for 30 seconds, so searches do not wait for it)
+     *         {@link #QUERY_TIMEOUT_MS} (then the search uses keywords only; after a slow answer the service is not
+     *         asked again for 5 seconds, after a failure for 30 seconds, so searches do not wait for it)
      */
     public static float[] queryVector(final String query) {
         if (query == null || query.isBlank()) return null;
         final float[] cached = queryCache.get(query);
         if (cached != null) return cached;
-        if (System.currentTimeMillis() - failedAt < 30000) return null;
+        if (System.currentTimeMillis() < failedUntil) return null;
         try {
             final float[] v = client().embed(List.of(prefix(SwitchboardConstants.SEARCH_VECTOR_QUERY_PREFIX) + query), Duration.ofMillis(QUERY_TIMEOUT_MS))[0];
             queryCache.put(query, v);
             return v;
         } catch (final IOException | RuntimeException e) {
-            failedAt = System.currentTimeMillis();
+            // an interrupted search says nothing about the service; a slow answer (the service is busy) pauses the
+            // vector search briefly, an unreachable or failing service for 30 seconds
+            if (!(e.getCause() instanceof InterruptedException)) {
+                failedUntil = System.currentTimeMillis() + (e instanceof java.net.http.HttpTimeoutException ? 5000 : 30000);
+            }
             ConcurrentLog.info("VectorSearch", "no query embedding (" + e.getMessage() + "); keyword search only");
             return null;
         }

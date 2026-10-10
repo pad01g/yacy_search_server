@@ -128,8 +128,10 @@ export class YaCy {
    * Remote peers answer over several seconds and YaCy fixes the order of results when they are first taken.
    * The first request starts the search; after waitMs the second one asks YaCy to sort all results that arrived.
    */
-  async search(query: string, opts: { resource: "global" | "local"; count: number; waitMs: number; signal?: AbortSignal }): Promise<{ total: number; results: Result[] }> {
+  async search(query: string, opts: { resource: "global" | "local"; count: number; waitMs: number; language?: string; signal?: AbortSignal }): Promise<{ total: number; results: Result[] }> {
     const params = new URLSearchParams({ query, resource: opts.resource, maximumRecords: String(opts.count), verify: "false", nav: "none", timezoneOffset: "0" });
+    // the preferred language (search.language.mode=prefer on the fork); validated by the tool schema
+    if (opts.language && /^[a-z]{2}$/.test(opts.language)) params.set("lr", `lang_${opts.language}`);
     // a pattern that matches nothing makes the cache key unique, so the result reflects the current settings
     params.set("prefermaskfilter", `\\Qno-match-${randomBytes(6).toString("hex")}\\E`);
     await this.json(`/yacysearch.json?${params}`, opts.signal);

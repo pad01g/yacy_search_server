@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkCrawlTarget, isPrivateAddress, SETTINGS, sameUrl, score, VERSION } from "../src/server.ts";
-import { clean, configFromEnv, parseChallenge, parseCrawlProfiles } from "../src/yacy.ts";
+import { clean, configFromEnv, parseChallenge, parseCrawlProfiles, YaCy } from "../src/yacy.ts";
 
 const r = (url: string) => ({ title: "", url, snippet: "", verified: null, trust: null, tags: [] });
 
@@ -81,3 +81,22 @@ test("only crawls a user started are listed", () => {
   ]);
 });
 
+
+test("the preferred language goes to the peer as lr, anything else is dropped", async () => {
+  const urls: string[] = [];
+  const saved = globalThis.fetch;
+  globalThis.fetch = (async (u: string) => {
+    urls.push(String(u));
+    return new Response(JSON.stringify({ channels: [{ totalResults: "0", items: [] }] }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const y = new YaCy(configFromEnv({ YACY_URL: "http://peer:8090" }));
+    await y.search("asyncio", { resource: "local", count: 5, waitMs: 0, language: "ja" });
+    assert.ok(urls.every((u) => new URL(u).searchParams.get("lr") === "lang_ja"));
+    urls.length = 0;
+    await y.search("asyncio", { resource: "local", count: 5, waitMs: 0, language: "ja&x=1" });
+    assert.ok(urls.length > 0 && urls.every((u) => new URL(u).searchParams.get("lr") === null));
+  } finally {
+    globalThis.fetch = saved;
+  }
+});

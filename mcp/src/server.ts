@@ -203,14 +203,15 @@ export function createServer(yacy: YaCy, env: NodeJS.ProcessEnv = process.env): 
         "No API key, no central service. Only the pages that peers crawled can be found: use crawl_site to add sites. " +
         UNTRUSTED,
       inputSchema: {
-        query: z.string().min(1).max(300).describe("search words; YaCy operators such as site:example.org work"),
+        query: z.string().min(1).max(300).describe("search words: the distinctive terms (names of APIs, commands, products, error messages) find the most; a short question also works on peers with vector search (local index only). YaCy operators such as site:example.org work"),
         resource: z.enum(["global", "local"]).default("global").describe("'global': ask the other peers too; 'local': only this peer's index"),
         count: z.number().int().min(1).max(50).default(10).describe("number of results to return (1-50)"),
+        language: z.string().regex(/^[a-z]{2}$/).optional().describe("ISO 639-1 code of the preferred language, e.g. 'ja': pages in it rank first, pages in other languages still appear (on the fork; other peers leave them out)"),
         waitMs: z.number().int().min(0).max(10000).default(5000).describe("how long to let other peers answer before the results are ranked (global only); at least the peer's remotesearch.maxtime"),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    safely(async ({ query, resource, count, waitMs }, extra) => yacy.search(query, { resource, count, waitMs, signal: extra.signal })),
+    safely(async ({ query, resource, count, waitMs, language }, extra) => yacy.search(query, { resource, count, waitMs, language, signal: extra.signal })),
   );
 
   server.registerTool(

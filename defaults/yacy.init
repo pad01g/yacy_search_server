@@ -1231,6 +1231,23 @@ search.ranking.solr.titlePhraseBoost = 20
 search.ranking.thin.words = 100
 search.ranking.thin.exponent = 1.0
 
+# vector search (docs/vector-search.md): an OpenAI-compatible embedding service (e.g. the image
+# ghcr.io/pad01g/yacy-embeddings, or Ollama) gives every document an embedding of title, description and the start of
+# the text (search.vector.passageChars characters); local searches merge the search.vector.topK nearest documents with
+# the keyword results (reciprocal rank fusion, the vector list weighted by search.vector.weight). Documents that miss
+# some query words but mean the same are found this way. The schema field has 384 dimensions: use a model with 384.
+search.vector.enabled = false
+search.vector.embeddings.url = http://127.0.0.1:8095/v1/embeddings
+search.vector.model = intfloat/multilingual-e5-small
+search.vector.queryPrefix = query:
+search.vector.passagePrefix = passage:
+search.vector.passageChars = 1500
+search.vector.topK = 50
+search.vector.weight = 1.0
+# how the two lists are merged: score (keyword score share + weight x scaled similarity; keeps clear keyword leads)
+# or rrf (reciprocal rank fusion: ranks only)
+search.vector.fusion = score
+
 # The boost fields contains all fields which shall be searched together with a boost. non-mentioned fields are not searched.
 
 # Boost queries are added to all queries; functions evaluate a value which is either added or multiplied with the ranking.

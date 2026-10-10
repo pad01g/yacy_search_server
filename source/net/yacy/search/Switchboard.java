@@ -231,6 +231,7 @@ import net.yacy.search.schema.CollectionConfiguration;
 import net.yacy.search.schema.CollectionSchema;
 import net.yacy.search.schema.WebgraphConfiguration;
 import net.yacy.search.snippet.TextSnippet;
+import net.yacy.search.vector.VectorIndexer;
 import net.yacy.server.serverCore;
 import net.yacy.server.serverSwitch;
 import net.yacy.server.http.RobotsTxtConfig;
@@ -1262,6 +1263,8 @@ public final class Switchboard extends serverSwitch {
 
         this.trail = new LinkedBlockingQueue<>();
 
+        // vector search: embeds documents without an embedding while search.vector.enabled is true (docs/vector-search.md)
+        VectorIndexer.start(this);
         this.log.config("Finished Switchboard Initialization");
     }
 

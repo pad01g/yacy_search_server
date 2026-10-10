@@ -133,6 +133,7 @@ import net.yacy.repository.Blacklist.BlacklistType;
 import net.yacy.search.EventTracker;
 import net.yacy.search.Switchboard;
 import net.yacy.search.SwitchboardConstants;
+import net.yacy.search.vector.VectorSearch;
 import net.yacy.search.index.Segment;
 import net.yacy.search.query.SearchEvent;
 import net.yacy.search.query.SecondarySearchSuperviser;
@@ -1370,6 +1371,21 @@ public final class Protocol {
                     if (!sc.isClosed()) {
                         rsp[0] = sc.getResponseByParams(solrQuery);
                         docList[0] = rsp[0].getResults();
+                        // vector search: merge the documents nearest to the query (also those the keyword query missed)
+                        if (offset == 0 && VectorSearch.enabled() && !event.query.servesRemotePeer()) {
+                            final float[] v = VectorSearch.queryVector(event.query.getQueryGoal().getQueryString(false));
+                            if (v != null) {
+                                final Switchboard sb = Switchboard.getSwitchboard();
+                                final int topK = Math.max(count, sb.getConfigInt(SwitchboardConstants.SEARCH_VECTOR_TOPK, SwitchboardConstants.SEARCH_VECTOR_TOPK_DEFAULT));
+                                try {
+                                    final SolrDocumentList nearest = sc.getResponseByParams(VectorSearch.knnQuery(solrQuery, v, topK)).getResults();
+                                    docList[0] = VectorSearch.fuse(sb.getConfig(SwitchboardConstants.SEARCH_VECTOR_FUSION, "score"), docList[0], nearest,
+                                            sb.getConfigFloat(SwitchboardConstants.SEARCH_VECTOR_WEIGHT, SwitchboardConstants.SEARCH_VECTOR_WEIGHT_DEFAULT), count);
+                                } catch (final Throwable e) {
+                                    Network.log.info("SEARCH (vector) failed, keyword results only (" + e.getMessage() + ")");
+                                }
+                            }
+                        }
                     }
                 } catch (final Throwable e) {
                     Network.log.info("SEARCH failed (solr), localpeer (" + e.getMessage() + ")", e);

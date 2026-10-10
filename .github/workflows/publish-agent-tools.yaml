@@ -4,6 +4,7 @@ name: Publish images and MCP server
 #   ghcr.io/pad01g/yacy-improved-search  the YaCy fork (docker/Dockerfile)
 #   ghcr.io/pad01g/yacy-sidecar          the libp2p sidecar for NAT traversal (sidecar/)
 #   ghcr.io/pad01g/yacy-search-mcp       the MCP server (mcp/)
+#   ghcr.io/pad01g/yacy-embeddings       the embedding service for vector search (embeddings/)
 # A tag mcp-v<version> (the version of mcp/package.json) also pushes the MCP image as :<version> and publishes
 # mcp/server.json to the MCP registry and creates a GitHub release. A manual run only updates :latest and :sha-<commit>.
 # Only commits on the default branch are published. The images and registry jobs run in the environment "release",
@@ -95,6 +96,11 @@ jobs:
             context: sidecar
             file: sidecar/Dockerfile
             description: "libp2p sidecar that lets a YaCy peer behind a NAT answer searches through a circuit relay"
+          - image: yacy-embeddings
+            license: MIT
+            context: embeddings
+            file: embeddings/Dockerfile
+            description: "Embedding service for YaCy vector search: OpenAI-compatible /v1/embeddings with multilingual-e5-small on CPU"
           - image: yacy-search-mcp
             license: MIT
             context: mcp

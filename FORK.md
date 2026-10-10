@@ -103,6 +103,16 @@ T verify bundle.json freeworld <coordinator の public key>
 ピアの公開鍵は `/yacy/seedlist.json?my=` の `PK`、または `T pubkey DATA/SETTINGS/peer.key`。
 委任の失効は `delegate ... <より大きい版> --revoke`。
 
+## ベクトル検索（意味で探す検索）
+
+キーワード検索は、質問の語が頁に無いと見つけられない（「how to run http server on python without extra dependency」で
+Python の `http.server` の頁が最小一致の 80% に届かず外れていた）。`search.vector.enabled=true` にすると、
+文書に多言語のモデル（intfloat/multilingual-e5-small、384 次元）の埋め込みを付け、ローカルの検索でキーワードの結果と
+意味の近い文書（Solr の knn）を Reciprocal Rank Fusion で合わせる。埋め込みは隣で動かす OpenAI 互換の
+`/v1/embeddings` のサービス（`embeddings/`、イメージ `ghcr.io/pad01g/yacy-embeddings`）が計算する。既存の索引も、
+新しく crawl した頁も、埋め込みの無い文書を YaCy が探して書き足す（`_version_` 付きの atomic update）。
+設計と設定は [docs/vector-search.md](docs/vector-search.md)。P2P の他のピアへは広げていない（ローカルの索引だけ）。
+
 ## ビルドとテスト
 
 ```sh

@@ -737,6 +737,24 @@ public final class SwitchboardConstants {
     public static final int SEARCH_RANKING_COVERAGE_EXPONENT_DEFAULT = 2;
 
     /**
+     * Vector search (see docs/vector-search.md): documents get an embedding from an OpenAI-compatible
+     * /v1/embeddings service, and local searches merge the nearest documents with the keyword results.
+     */
+    public static final String SEARCH_VECTOR_ENABLED = "search.vector.enabled";
+    public static final String SEARCH_VECTOR_URL = "search.vector.embeddings.url";
+    public static final String SEARCH_VECTOR_MODEL = "search.vector.model";
+    public static final String SEARCH_VECTOR_MODEL_DEFAULT = "intfloat/multilingual-e5-small";
+    public static final String SEARCH_VECTOR_QUERY_PREFIX = "search.vector.queryPrefix";
+    public static final String SEARCH_VECTOR_PASSAGE_PREFIX = "search.vector.passagePrefix";
+    public static final String SEARCH_VECTOR_PASSAGE_CHARS = "search.vector.passageChars";
+    public static final int SEARCH_VECTOR_PASSAGE_CHARS_DEFAULT = 1500;
+    public static final String SEARCH_VECTOR_TOPK = "search.vector.topK";
+    public static final int SEARCH_VECTOR_TOPK_DEFAULT = 50;
+    public static final String SEARCH_VECTOR_WEIGHT = "search.vector.weight";
+    public static final float SEARCH_VECTOR_WEIGHT_DEFAULT = 1.0f;
+    public static final String SEARCH_VECTOR_FUSION = "search.vector.fusion";
+
+    /**
      * minimum age in days of a peer to be asked in a remote DHT (RWI) search. Upstream hard-codes 3, which means that
      * a network of new peers never searches the word indexes of the other peers.
      */

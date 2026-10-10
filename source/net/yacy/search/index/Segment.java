@@ -558,7 +558,47 @@ public class Segment {
                 }
             }
         }
+        // The statistics count space separated words: a Japanese, Chinese or Korean page with code samples or English
+        // terms looks English to them, and a generic TLD (.org, .com) then confirms that. Believe a declared CJK
+        // language if some of the text is written in its script, and recognize kana and hangul text whatever the
+        // page declares (some sites declare lang="en" on every translated page).
+        final String text = document.getTextString();
+        if (bymetadata != null && !bymetadata.equals(language) && scriptShare(text, bymetadata) >= DECLARED_SCRIPT_SHARE) {
+            language = bymetadata;
+        } else if (!"ja".equals(language) && scriptShare(text, "kana") >= UNDECLARED_SCRIPT_SHARE) {
+            language = "ja";
+        } else if (!"ko".equals(language) && scriptShare(text, "ko") >= UNDECLARED_SCRIPT_SHARE) {
+            language = "ko";
+        }
         return language;
+    }
+
+    /** share of the letters in the script of a declared CJK language at which the declaration is believed */
+    static final double DECLARED_SCRIPT_SHARE = 0.03d;
+    /** share of the letters in kana or hangul at which the text is Japanese or Korean without a declaration */
+    static final double UNDECLARED_SCRIPT_SHARE = 0.2d;
+
+    /**
+     * @param language ja (kana and kanji), zh (hanzi), ko (hangul) or kana (only kana: Japanese, not Chinese)
+     * @return the share of the letters in the first 20000 characters of the text that belong to the script of the
+     *         language, 0 for other languages
+     */
+    public static double scriptShare(final String text, final String language) {
+        if (text == null || language == null) return 0d;
+        final boolean kana = "kana".equals(language), ja = "ja".equals(language), zh = "zh".equals(language), ko = "ko".equals(language);
+        if (!kana && !ja && !zh && !ko) return 0d;
+        int letters = 0, script = 0;
+        final int end = Math.min(text.length(), 20000);
+        for (int i = 0; i < end; i++) {
+            final char c = text.charAt(i);
+            if (!Character.isLetter(c)) continue;
+            letters++;
+            final Character.UnicodeScript s = Character.UnicodeScript.of(c);
+            if (s == Character.UnicodeScript.HAN ? (ja || zh)
+                    : (s == Character.UnicodeScript.HIRAGANA || s == Character.UnicodeScript.KATAKANA) ? (ja || kana)
+                    : s == Character.UnicodeScript.HANGUL && ko) script++;
+        }
+        return letters == 0 ? 0d : (double) script / letters;
     }
 
     public void storeRWI(final ReferenceContainer<WordReference> wordContainer) throws IOException, SpaceExceededException {

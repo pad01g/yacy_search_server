@@ -211,14 +211,14 @@ public final class TransformerWriter extends Writer {
     }
 
     /* inside TransformerWriter */
-    private static void mdPrefix(final ContentScraper.Tag tag, final CharBuffer target) {
-        if (tag != null && tag.tagType != null && tag.tagType.mdPrefix != null && tag.tagType.mdPrefix.length() > 0) {
-            target.append(tag.tagType.mdPrefix);
+    private static void mdPrefix(final ContentScraper.Tag tag, final ContentScraper target) {
+        if (target != null && tag != null && tag.tagType != null && tag.tagType.mdPrefix != null && tag.tagType.mdPrefix.length() > 0) {
+            target.appendText(tag.tagType.mdPrefix, tag);
         }
     }
-    private static void mdSuffix(final ContentScraper.Tag tag, final CharBuffer target) {
-        if (tag != null && tag.tagType != null && tag.tagType.mdSuffix != null && tag.tagType.mdSuffix.length() > 0) {
-            target.append(tag.tagType.mdSuffix);
+    private static void mdSuffix(final ContentScraper.Tag tag, final ContentScraper target) {
+        if (target != null && tag != null && tag.tagType != null && tag.tagType.mdSuffix != null && tag.tagType.mdSuffix.length() > 0) {
+            target.appendText(tag.tagType.mdSuffix, tag);
         }
     }
 
@@ -283,6 +283,12 @@ public final class TransformerWriter extends Writer {
             return new char[0];
         }
 
+        if (!tagname.equalsIgnoreCase(this.tagStack.lastElement().tagName) && this.isOpen(tagname)) {
+            // like browsers, an end tag closes the elements left open inside it (an unclosed <li> in a <nav>, an
+            // unclosed <span> in a <div>), so that the element does not extend to the rest of the page
+            while (!tagname.equalsIgnoreCase(this.tagStack.lastElement().tagName)) this.filterTagCloseing(quotechar);
+        }
+
         if (!tagname.equalsIgnoreCase(this.tagStack.lastElement().tagName)) {
             // case (6): its a closing tag, but the wrong one. just add it.
             this.tagStack.lastElement().content.append(generateSingletonTagRaw(tagname, opening, content));
@@ -291,6 +297,11 @@ public final class TransformerWriter extends Writer {
 
         // it's our closing tag! return complete result.
         return this.filterTagCloseing(quotechar);
+    }
+
+    private boolean isOpen(final String tagname) {
+        for (final ContentScraper.Tag t : this.tagStack) if (tagname.equalsIgnoreCase(t.tagName)) return true;
+        return false;
     }
 
     private char[] filterTagOpening(final String tagname, final char[] content) {
@@ -308,10 +319,11 @@ public final class TransformerWriter extends Writer {
         /* Check scraper ignoring rules */
         if (this.scraper != null) {
             tag.setValency(this.scraper.tagValency(tag, parentTag));
+            this.scraper.tagRegion(tag, parentTag);
         }
 
         // add markdown for the tag
-        mdPrefix(tag, this.scraper.content);
+        mdPrefix(tag, this.scraper);
 
         /* Apply processing relevant for any kind of tag opening */
         if(this.scraper != null) {
@@ -343,8 +355,9 @@ public final class TransformerWriter extends Writer {
             if (this.tagStack.size() > 0) this.tagStack.lastElement().content.append(ret);
         }
 
-        // add markdown for the tag
-        mdSuffix(tag, this.scraper.content);
+        // end the sentence of a block, then add markdown for the tag
+        if (this.scraper != null) this.scraper.endBlock(tag);
+        mdSuffix(tag, this.scraper);
         return ret;
     }
 

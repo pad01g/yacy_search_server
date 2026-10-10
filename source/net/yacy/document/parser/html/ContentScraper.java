@@ -31,6 +31,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.text.ParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
@@ -134,6 +135,10 @@ public class ContentScraper extends AbstractScraper implements Scraper {
         div(TagOp.pair, "\n\n", ""),
         nav(TagOp.pair, "", ""),
         article(TagOp.pair, "", ""), // html5
+        main(TagOp.pair, "", ""), // html5: the main content, see getText()
+        header(TagOp.pair, "", ""), // html5: banner unless inside main or article
+        footer(TagOp.pair, "", ""), // html5: content info unless inside main or article
+        aside(TagOp.pair, "", ""), // html5: sidebar
         time(TagOp.pair, "", ""), // html5 <time datetime>
         // tags used to capture tag content
         // TODO: consider to use </head> or <body> as trigger to scrape for text content
@@ -156,6 +161,10 @@ public class ContentScraper extends AbstractScraper implements Scraper {
         public Properties opts;
         public CharBuffer content;
         private TagValency tv;
+        /** inside the main content (main, article, role=main) */
+        public boolean main;
+        /** inside page furniture (navigation, banner, sidebar, footer): its text is not part of the main text */
+        public boolean boilerplate;
         public Tag(final String name, final TagValency defaultValency) {
             this.tagName = name;
             try {this.tagType = TagType.valueOf(name.toLowerCase());} catch (final IllegalArgumentException e) {this.tagType = TagType.unknown;}
@@ -232,7 +241,12 @@ public class ContentScraper extends AbstractScraper implements Scraper {
     private List<String>[] headlines;
     private final ClusteredScoreMap<String> bold, italic, underline;
     private final List<String> li, dt, dd;
+    /** all text of the page */
     final CharBuffer content;
+    /** the text outside the page furniture (navigation, banner, sidebar, footer) */
+    final CharBuffer contentWithoutBoilerplate;
+    /** the text inside main, article or role=main, without the page furniture there */
+    final CharBuffer mainContent;
     private final EventListenerList htmlFilterEventListeners;
     private double lon, lat;
     private AnchorURL canonical, publisher;
@@ -324,6 +338,8 @@ public class ContentScraper extends AbstractScraper implements Scraper {
         this.dt = new ArrayList<>();
         this.dd = new ArrayList<>();
         this.content = new CharBuffer(MAX_DOCSIZE, 1024);
+        this.contentWithoutBoilerplate = new CharBuffer(MAX_DOCSIZE, 1024);
+        this.mainContent = new CharBuffer(MAX_DOCSIZE, 1024);
         this.htmlFilterEventListeners = new EventListenerList();
         this.lon = 0.0d;
         this.lat = 0.0d;
@@ -361,6 +377,8 @@ public class ContentScraper extends AbstractScraper implements Scraper {
     @Override
     public void finish() {
         this.content.trimToSize();
+        this.contentWithoutBoilerplate.trimToSize();
+        this.mainContent.trimToSize();
     }
 
     @Override
@@ -436,16 +454,10 @@ public class ContentScraper extends AbstractScraper implements Scraper {
             break location;
         }
         // find tags inside text
-        String b = cleanLine(stripAllTags(newtext));
-        if ((insideTag != null) && (insideTag.tagType != TagType.a)) {
-            // texts inside tags sometimes have no punctuation at the line end
-            // this is bad for the text semantics, because it is not possible for the
-            // condenser to distinguish headlines from text beginnings.
-            // to make it easier for the condenser, a dot ('.') is appended in case that
-            // no punctuation is part of the newtext line
-            if ((b.length() != 0) && (!(SentenceReader.punctuation(b.charAt(b.length() - 1))))) b = b + '.';
-            //System.out.println("*** Appended dot: " + b.toString());
-        }
+        final String b = cleanLine(stripAllTags(newtext));
+        // texts of headlines, list items and other blocks often have no punctuation at the end; the dot that the
+        // condenser needs to tell them from the next sentence is added at the end of the block (endBlock), not after
+        // every piece of text: inline tags (span, code, b) would split sentences and code into "import. asyncio."
         // find absolute URLs inside text
         final Object[] listeners = this.htmlFilterEventListeners.getListenerList();
         final List<ContentScraperListener> anchorListeners = new ArrayList<>();
@@ -470,9 +482,81 @@ public class ContentScraper extends AbstractScraper implements Scraper {
 
         // append string to content
         if (!b.isEmpty()) {
-            this.content.append(b);
-            this.content.appendSpace();
+            this.appendText(b, insideTag);
+            this.appendText(" ", insideTag);
         }
+    }
+
+    private static final Set<TagType> BLOCK_TAGS = java.util.EnumSet.of(TagType.p, TagType.div, TagType.li, TagType.dt, TagType.dd,
+            TagType.h1, TagType.h2, TagType.h3, TagType.h4, TagType.h5, TagType.h6, TagType.title, TagType.pre,
+            TagType.article, TagType.main, TagType.header, TagType.footer, TagType.aside, TagType.nav);
+
+    /** end of a tag: a block (paragraph, headline, list item...) ends its sentence */
+    void endBlock(final Tag tag) {
+        if (tag == null || tag.tagType == null || !BLOCK_TAGS.contains(tag.tagType)) return;
+        endSentence(this.content);
+        if (!tag.boilerplate) {
+            endSentence(this.contentWithoutBoilerplate);
+            if (tag.main) endSentence(this.mainContent);
+        }
+    }
+
+    private static void endSentence(final CharBuffer buffer) {
+        int last = buffer.length() - 1;
+        while (last >= 0 && buffer.charAt(last) <= ' ') last--;
+        if (last < 0) return;
+        final char c = buffer.charAt(last);
+        if (SentenceReader.punctuation(c) || "。！？：；:;,、".indexOf(c) >= 0) return;
+        while (buffer.length() - 1 > last) buffer.deleteCharAt(buffer.length() - 1);
+        buffer.append(". ");
+    }
+
+    /** add text or markup to the text of the page and to the main text, if it belongs there */
+    void appendText(final String text, final Tag insideTag) {
+        this.content.append(text);
+        if (insideTag == null || !insideTag.boilerplate) {
+            this.contentWithoutBoilerplate.append(text);
+            if (insideTag != null && insideTag.main) this.mainContent.append(text);
+        }
+    }
+
+    /**
+     * When true (the default), getText() returns the main text of a page: the text inside main, article or
+     * role=main if there is enough of it, else the text without the page furniture. Links in the page furniture are
+     * still followed.
+     */
+    public static volatile boolean extractMainContent = true;
+
+    /** CSS classes of page furniture that is not marked up with html5 tags or roles (DocBook, Sphinx, Javadoc...) */
+    public static volatile Set<String> boilerplateClasses = new HashSet<>(Arrays.asList(
+            "navheader", "navfooter", "sphinxsidebar", "related", "breadcrumb", "breadcrumbs", "sidebar", "skip-link", "cookie-banner",
+            "navbar", "navbar-collapse", "versions"));
+
+    private static final Set<String> BOILERPLATE_ROLES = new HashSet<>(Arrays.asList("navigation", "complementary", "search"));
+    private static final Set<String> BANNER_ROLES = new HashSet<>(Arrays.asList("banner", "contentinfo"));
+
+    /** mark a tag as main content or page furniture; the marks are inherited from the parent tag */
+    public void tagRegion(final Tag tag, final Tag parentTag) {
+        if (parentTag != null) {
+            tag.main = parentTag.main;
+            tag.boilerplate = parentTag.boilerplate;
+        }
+        if (tag.boilerplate || tag.opts == null) return;
+        final String role = tag.opts.getProperty("role", EMPTY_STRING).trim().toLowerCase(Locale.ROOT);
+        final TagType type = tag.tagType;
+        if (type == TagType.nav || type == TagType.aside || BOILERPLATE_ROLES.contains(role)
+                || (!tag.main && (type == TagType.header || type == TagType.footer || BANNER_ROLES.contains(role)))) {
+            tag.boilerplate = true;
+            return;
+        }
+        if (type == TagType.div || type == TagType.span) {
+            final String classAttr = tag.opts.getProperty("class", EMPTY_STRING);
+            if (!classAttr.isEmpty() && !Collections.disjoint(boilerplateClasses, ContentScraper.parseSpaceSeparatedTokens(classAttr))) {
+                tag.boilerplate = true;
+                return;
+            }
+        }
+        if (type == TagType.main || type == TagType.article || "main".equals(role)) tag.main = true;
     }
 
     private final static Pattern protp = Pattern.compile("smb://|ftp://|http://|https://");
@@ -1202,10 +1286,27 @@ public class ContentScraper extends AbstractScraper implements Scraper {
     private final Pattern tripleN = Pattern.compile("\n\n\n");
     private final Pattern doubleNd = Pattern.compile("\n\n- ");
 
+    /** the main text needs at least this many characters ... */
+    static final int MIN_MAIN_TEXT = 100;
+    /** ... and this share of the text outside the page furniture, else the page furniture is all that is removed */
+    static final double MIN_MAIN_SHARE = 0.2;
+
     public String getText() {
+        if (extractMainContent) {
+            final int all = this.content.trim().length();
+            final int clean = this.contentWithoutBoilerplate.trim().length();
+            final int main = this.mainContent.trim().length();
+            if (main >= MIN_MAIN_TEXT && main >= MIN_MAIN_SHARE * clean) return this.finalText(this.mainContent);
+            // a page made only of furniture, or furniture that was never closed: keep everything
+            if (clean >= MIN_MAIN_TEXT && clean >= 0.1 * all) return this.finalText(this.contentWithoutBoilerplate);
+        }
+        return this.finalText(this.content);
+    }
+
+    private String finalText(final CharBuffer buffer) {
         try {
             // finalize the content
-            String text = this.content.trim().toString();
+            String text = buffer.trim().toString();
             Matcher m;
             while ((m = this.tripleN.matcher(text)).find()) text = m.replaceAll("\n\n");
             while ((m = this.doubleNd.matcher(text)).find()) text = m.replaceAll("\n- ");
@@ -1560,6 +1661,8 @@ public class ContentScraper extends AbstractScraper implements Scraper {
         this.dt.clear();
         this.dd.clear();
         this.content.clear();
+        this.contentWithoutBoilerplate.clear();
+        this.mainContent.clear();
         this.root = null;
     }
 

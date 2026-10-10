@@ -81,18 +81,20 @@ public class SitemapImporter extends Thread {
         } catch (final MalformedURLException e1) {
         }
 
+        if (url == null) return;
+
+        // the URL filters of the crawl: the crawl stacker applies them only to links (depth > 0), and a sitemap of a
+        // whole site (all languages of MDN, all releases) would otherwise fill the queue until the loader rejects them
+        if (!inFilters(url.toNormalform(true), this.crawlingProfile.urlMustMatchPattern(), this.crawlingProfile.urlMustNotMatchPattern())) return;
+
         // check if the url is known and needs to be recrawled
-        Date lastMod = entry.lastmod(null);
+        final Date lastMod = entry.lastmod(null);
         if (lastMod != null) {
-            HarvestProcess dbocc = this.sb.getHarvestProcess(ASCII.String(nexturlhash));
+            final HarvestProcess dbocc = this.sb.getHarvestProcess(ASCII.String(nexturlhash));
             if (dbocc != null && dbocc == HarvestProcess.LOADED) {
-                // the url was already loaded. we need to check the date
+                // the url was already loaded: load it again only if the sitemap says it changed after it was loaded
                 final URIMetadataNode oldEntry = this.sb.index.fulltext().getMetadata(nexturlhash);
-                if (oldEntry != null) {
-                    final Date modDate = oldEntry.moddate();
-                    // check if modDate is null
-                    if (modDate.after(lastMod)) return;
-                }
+                if (oldEntry != null && !changedSince(lastMod, oldEntry.loaddate(), oldEntry.moddate())) return;
             }
         }
 
@@ -108,5 +110,21 @@ public class SitemapImporter extends Thread {
                 this.crawlingProfile.timezoneOffset()
                 ));
         logger.info("New URL '" + entry.url() + "' added for loading.");
+    }
+
+    /** @return true if the url matches the must-match filter and not the must-not-match filter */
+    static boolean inFilters(final String url, final java.util.regex.Pattern mustMatch, final java.util.regex.Pattern mustNotMatch) {
+        return (mustMatch == null || mustMatch.matcher(url).matches()) && (mustNotMatch == null || !mustNotMatch.matcher(url).matches());
+    }
+
+    /**
+     * @return true if a page that the sitemap says was modified at lastMod changed after the indexed copy: after it
+     *         was loaded and after its own modification date; unknown dates do not count
+     */
+    static boolean changedSince(final Date lastMod, final Date loaded, final Date modified) {
+        if (lastMod == null) return true;
+        Date known = loaded;
+        if (modified != null && (known == null || modified.after(known))) known = modified;
+        return known == null || lastMod.after(known);
     }
 }

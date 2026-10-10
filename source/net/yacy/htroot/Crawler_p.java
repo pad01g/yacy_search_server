@@ -381,8 +381,8 @@ public class Crawler_p {
                 }
 
                 if ("sitemap".equals(crawlingMode)) {
-                    newcrawlingMustMatch = CrawlProfile.MATCH_ALL_STRING;
-                    newcrawlingMustNotMatch = CrawlProfile.MATCH_NEVER_STRING;
+                    // the URL filters submitted with the form stay (their defaults let everything pass): they limit a
+                    // sitemap of a whole site (all languages of MDN) to the part that is wanted
                     newcrawlingdepth = 0;
                     directDocByURL = false;
                 }

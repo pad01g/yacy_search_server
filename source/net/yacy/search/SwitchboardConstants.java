@@ -777,6 +777,8 @@ public final class SwitchboardConstants {
     public static final String SEARCH_LANGUAGE_MODE = "search.language.mode";
     /** keep one of the copies of a page for other versions (/v19.03/x, /docs/17/x) in the local results */
     public static final String SEARCH_RANKING_COLLAPSE_VERSIONS = "search.ranking.collapseVersions";
+    /** log the score parts of each local result (RANKDEBUG) */
+    public static final String SEARCH_DEBUG_RANKING = "search.debug.ranking";
     /** the pages the administrator opened for a query rank up to this much higher in later local searches; 0: off */
     public static final String SEARCH_RANKING_CLICKS_WEIGHT = "search.ranking.clicks.weight";
     public static final float SEARCH_RANKING_CLICKS_WEIGHT_DEFAULT = 0.5f;

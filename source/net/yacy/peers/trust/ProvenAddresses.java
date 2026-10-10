@@ -35,11 +35,12 @@ public final class ProvenAddresses {
 
     private static final int MAX_ENTRIES = 20000;
     /** the least recently used entries go first (clearing all at the limit would let new keys wipe every proof) */
-    private static final Map<String, String> proven = Collections.synchronizedMap(new LinkedHashMap<String, String>(256, 0.75f, true) {
+    /** per key the proven IPv4 and IPv6 address (a dual-stack peer is searched at the first address of its seed) */
+    private static final Map<String, String[]> proven = Collections.synchronizedMap(new LinkedHashMap<String, String[]>(256, 0.75f, true) {
         private static final long serialVersionUID = 1L;
 
         @Override
-        protected boolean removeEldestEntry(final Map.Entry<String, String> eldest) {
+        protected boolean removeEldestEntry(final Map.Entry<String, String[]> eldest) {
             return size() > MAX_ENTRIES;
         }
     });
@@ -50,7 +51,14 @@ public final class ProvenAddresses {
     /** remember that the owner of the seed with this hash answered at this IP */
     public static void prove(final String hash, final String ip) {
         if (hash == null || ip == null) return;
-        proven.put(hash, normalize(ip));
+        final String n = normalize(ip);
+        final int family = n.indexOf(':') >= 0 ? 1 : 0;
+        synchronized (proven) {
+            final String[] old = proven.get(hash);
+            final String[] now = old == null ? new String[2] : old.clone();
+            now[family] = n;
+            proven.put(hash, now);
+        }
     }
 
     /**
@@ -72,10 +80,12 @@ public final class ProvenAddresses {
             final String route = seed.isRelayed() && seed.isSigned() ? P2PRoute.baseURL(seed) : null;
             return route != null && sameEndpoint(route, url);
         }
-        final String ip = proven.get(seed.hash);
-        if (ip == null) return false;
+        final String[] ips = proven.get(seed.hash);
+        if (ips == null) return false;
         final String host = Domains.stripToHostName(url.getHost());
-        return host != null && ip.equals(normalize(host));
+        if (host == null) return false;
+        final String h = normalize(host);
+        return h.equals(ips[0]) || h.equals(ips[1]);
     }
 
     private static boolean sameEndpoint(final String baseURL, final MultiProtocolURL url) {

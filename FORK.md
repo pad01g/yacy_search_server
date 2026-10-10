@@ -41,6 +41,26 @@ docker compose の閉じた P2P 網を立てて測っている（検索品質: u
 による取り直し。検索のたびのモデルの実行は増やしていない。詳細と測定結果は
 [docs/search-quality.md](docs/search-quality.md)。
 
+## 既存のピアから移るとき
+
+upstream（またはこのフォークの古い版）の DATA で起動したときに起きること:
+
+- **ピアのハッシュが変わる**: ハッシュは新しく作るピアの鍵（`DATA/SETTINGS/peer.key`）から決まる。古い seed は
+  ログに理由を書いて捨てられ、新しい身元になる（DHT 上の位置も変わる）。
+- **upstream のピアとは話さない**: 署名の無い seed は既定で受け付けない（`trust.seed.acceptUnsigned=false`）。
+  `trust.coordinators` が空なら、署名のあるピア（このフォーク）の結果だけを使う。freeworld の網にいても、upstream の
+  ピアからは DHT の穴、または CJK で結果を返さないピアに見える。
+- **再索引が要るもの**: Solr の `text_general` の解析（CJK の bigram、英語の複数形）は、起動時に schema が書き直される
+  ので、検索の側だけすぐ変わる。古い文書は再索引するまで CJK の質問と複数形の質問に当たりにくくなる（移る前より
+  悪くなる）。本文の抜き出し、言語の判定、語数（`wordcount_i`）、作者の署名（`provenance_s`）も、再索引した文書から。
+  再索引は crawl し直すか、`IndexReIndexMonitor_p.html`。
+- **言語の選択の意味が変わる**: 検索画面の言語（`lr`、cookie）は絞り込みでなく優先になる（`search.language.mode=filter`
+  で元に戻る）。
+- **既存の `DATA/SETTINGS/yacy.conf` の値は変わらない**: 新しいキーは既定値で足されるが、既にあるキーは古い値のまま。
+  このフォークの既定に合わせるなら、`/ConfigProperties_p.html` で次を変える:
+  `remotesearch.maxtime=5000`、`search.ranking.solr.collection.boostfields.tmpa.0` に `,anchors_in_txt^2.0` を足す
+  （`search.ranking.anchors.enabled=true` にする場合）。
+
 ## ピアの身元・信頼・NAT 越え
 
 設計と設定値の一覧は [docs/trust-and-nat.md](docs/trust-and-nat.md)。既定の動作:
@@ -143,7 +163,8 @@ TESTS="net.yacy.document.CJKBigramsTest net.yacy.document.WordTokenizerTest net.
   net.yacy.peers.trust.OwnAddressesTest net.yacy.peers.trust.P2PRouteTest net.yacy.peers.BootstrapPeersTest
   net.yacy.search.vector.VectorSearchTest net.yacy.search.ranking.VersionCollapseTest net.yacy.search.ranking.ClickStoreTest
   net.yacy.search.ranking.AnchorIndexerTest net.yacy.document.parser.html.ContentScraperTest
-  net.yacy.document.parser.html.MainContentTest net.yacy.crawler.retrieval.SitemapImporterTest net.yacy.search.index.SegmentLanguageTest"
+  net.yacy.document.parser.html.MainContentTest net.yacy.crawler.retrieval.SitemapImporterTest net.yacy.search.index.SegmentLanguageTest
+  net.yacy.htroot.api.ClickOriginTest net.yacy.utils.CryptLimitTest"
 ant compile
 FILES="test/java/net/yacy/peers/trust/PeerIdentityTestAccess.java"
 for t in $TESTS; do FILES="$FILES test/java/$(echo $t | tr . /).java"; done

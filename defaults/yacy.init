@@ -1244,7 +1244,7 @@ search.ranking.thin.exponent = 1.0
 # vector search (docs/vector-search.md): an OpenAI-compatible embedding service (e.g. the image
 # ghcr.io/pad01g/yacy-embeddings, or Ollama) gives every document an embedding of title, description and the start of
 # the text (search.vector.passageChars characters); local searches merge the search.vector.topK nearest documents with
-# the keyword results (reciprocal rank fusion, the vector list weighted by search.vector.weight). Documents that miss
+# the keyword results (search.vector.fusion, the vector side weighted by search.vector.weight). Documents that miss
 # some query words but mean the same are found this way. The schema field has 384 dimensions: use a model with 384.
 search.vector.enabled = false
 # false: only searches of the administrator (with the password, or from localhost when adminAccountForLocalhost is
@@ -1258,7 +1258,8 @@ search.vector.passagePrefix = passage:
 search.vector.passageChars = 1500
 search.vector.topK = 50
 search.vector.weight = 1.0
-# how the two lists are merged: score (keyword score share + weight x scaled similarity; keeps clear keyword leads)
+# how the two lists are merged: score (keyword score share + weight x similarity scaled within the nearest
+# documents; keeps clear keyword leads), abs (the same with the similarity measured between simLow and simHigh)
 # or rrf (reciprocal rank fusion: ranks only)
 search.vector.fusion = score
 # fusion "abs": the similarity counts from search.vector.simLow (nothing) to search.vector.simHigh (the full weight),
@@ -1281,6 +1282,8 @@ search.language.otherWeight = 0.5
 # local results: keep only the best ranked of the copies of a page for other versions (docs/17/x, docs/current/x,
 # /v19.03/x, /v20.10/x) and of the spellings of one URL (trailing slash, index.html)
 search.ranking.collapseVersions = true
+# log the score parts of each local result (RANKDEBUG): Solr score, boosts, word count, final ranking
+search.debug.ranking = false
 
 # the results the administrator opens (clicks on the search page) for a query rank higher in later local searches of
 # the same query: their score times up to 1 + this weight (reached at 8 clicks). Stored in DATA/WORK/clicks.json,

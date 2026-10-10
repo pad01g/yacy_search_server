@@ -79,7 +79,7 @@ public final class VectorIndexer extends Thread {
 
     @Override
     public void run() {
-        while (!isInterrupted()) {
+        while (!this.stopped) {
             long sleep = IDLE_MS;
             try {
                 final Switchboard sb = Switchboard.getSwitchboard();
@@ -95,7 +95,9 @@ public final class VectorIndexer extends Thread {
                 sleep = ERROR_MS;
             }
             try {
-                Thread.sleep(sleep);
+                synchronized (this.pause) {
+                    if (!this.stopped) this.pause.wait(sleep);
+                }
             } catch (final InterruptedException e) {
                 return;
             }
@@ -107,8 +109,21 @@ public final class VectorIndexer extends Thread {
 
     /** stop the thread (YaCy shuts down) */
     public static synchronized void shutdown() {
-        if (instance != null) instance.interrupt();
+        if (instance == null) return;
+        // no interrupt: an interrupt during a Solr update can close the files of the index
+        instance.stopped = true;
+        synchronized (instance.pause) {
+            instance.pause.notifyAll();
+        }
+        try {
+            instance.join(30000);
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
+
+    private volatile boolean stopped = false;
+    private final Object pause = new Object();
 
     /** the query for documents that still need an embedding of this model */
     static String pendingQuery(final String model) {

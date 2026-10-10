@@ -231,6 +231,8 @@ public class ProvenanceTest {
         ProvenAddresses.prove(other.peerHash(), "2001:db8::5");
         assertFalse(Provenance.keepSnippet(fromOther, seed, "http://198.51.100.9:8090"));
         assertTrue(Provenance.keepSnippet(fromOther, seed, "http://[2001:db8::5]:8090"));
+        // the IPv4 proof stays next to the IPv6 one (a dual-stack peer is searched at its first address)
+        assertTrue(Provenance.keepSnippet(fromOther, seed, "http://192.0.2.5:8090"));
         assertFalse(Provenance.keepSnippet(fromOther, seed, null));
         ProvenAddresses.clear();
     }

@@ -205,12 +205,34 @@ public class CollectionConfiguration extends SchemaConfiguration implements Seri
         }
     }
 
+    private static String[] concat(final String[] a, final String[] b) {
+        final String[] c = java.util.Arrays.copyOf(a, a.length + b.length);
+        System.arraycopy(b, 0, c, a.length, b.length);
+        return c;
+    }
+
     public String[] allFields() {
         final ArrayList<String> a = new ArrayList<>(this.size());
         for (final CollectionSchema f: CollectionSchema.values()) {
             if (this.contains(f)) a.add(f.getSolrFieldName());
         }
         return a.toArray(new String[a.size()]);
+    }
+
+    /**
+     * Fields that background tasks add to a document by atomic updates and that are not in the collection schema:
+     * the embeddings (search.vector) and the date of the anchor collection. A rewrite of a whole document keeps
+     * them; otherwise the tasks would compute them again for every rewritten document.
+     */
+    public static final String[] UPDATED_FIELDS = {"embedding_knn", "embedding_knn_1", "embedding_knn_2", "embedding_knn_3",
+            "embedding_model_s", "anchors_in_date_dt"};
+
+    /** copy the {@link #UPDATED_FIELDS} of a document that is written again as a whole */
+    public static void keepUpdatedFields(final SolrDocument from, final SolrInputDocument to) {
+        for (final String f : UPDATED_FIELDS) {
+            final Object v = from.getFieldValue(f);
+            if (v != null && to.getField(f) == null) to.setField(f, v);
+        }
     }
 
     public Ranking getRanking(final int idx) {
@@ -1384,7 +1406,7 @@ public class CollectionConfiguration extends SchemaConfiguration implements Seri
                         CollectionSchema.httpstatus_i.getSolrFieldName(),
                         CollectionSchema.inboundlinkscount_i.getSolrFieldName(),
                         CollectionSchema.robots_i.getSolrFieldName()} :
-                        this.allFields());
+                        concat(this.allFields(), UPDATED_FIELDS));
                 final Thread rewriteThread[] = new Thread[concurrency];
                 for (int rewrite_start = 0; rewrite_start < concurrency; rewrite_start++) {
                     rewriteThread[rewrite_start] = new Thread("CollectionConfiguration.postprocessing.rewriteThread-" + rewrite_start) {
@@ -1406,6 +1428,7 @@ public class CollectionConfiguration extends SchemaConfiguration implements Seri
                                         final DigestURL url = new DigestURL(u, ASCII.getBytes(i));
                                         final byte[] id = url.hash();
                                         final SolrInputDocument sid = byPartialUpdate ? new SolrInputDocument() : collection.toSolrInputDocument(doc, localOmitFields);
+                                        if (!byPartialUpdate) keepUpdatedFields(doc, sid);
                                         sid.setField(CollectionSchema.id.getSolrFieldName(), i);
                                         for (final Object tag: proctags) try {
 

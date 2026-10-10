@@ -126,10 +126,12 @@ public class MainContentTest {
     @Test
     public void testAsideInsideTheArticleIsText() throws IOException {
         final ContentScraper s = scrape("<html><body><aside>Sidebar links</aside><main><article><p>" + LONG + "</p>"
-                + "<aside class='note'>Note: borrowing rules apply here.</aside></article></main></body></html>");
+                + "<aside class='note'>Note: borrowing rules apply here.</aside></article>"
+                + "<aside>Related posts beside the article</aside></main></body></html>");
         final String text = s.getText();
         assertTrue(text, text.contains("borrowing rules"));
         assertFalse(text, text.contains("Sidebar links"));
+        assertFalse(text, text.contains("Related posts"));
         s.close();
     }
 

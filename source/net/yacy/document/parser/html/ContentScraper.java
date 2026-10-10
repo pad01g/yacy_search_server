@@ -163,6 +163,8 @@ public class ContentScraper extends AbstractScraper implements Scraper {
         private TagValency tv;
         /** inside the main content (main, article, role=main) */
         public boolean main;
+        /** inside an article element: an aside here is a note of the text, not a sidebar of the page */
+        public boolean article;
         /** inside page furniture (navigation, banner, sidebar, footer): its text is not part of the main text */
         public boolean boilerplate;
         public Tag(final String name, final TagValency defaultValency) {
@@ -539,18 +541,20 @@ public class ContentScraper extends AbstractScraper implements Scraper {
     public void tagRegion(final Tag tag, final Tag parentTag) {
         if (parentTag != null) {
             tag.main = parentTag.main;
+            tag.article = parentTag.article;
             tag.boilerplate = parentTag.boilerplate;
         }
         if (tag.boilerplate || tag.opts == null) return;
         final String role = tag.opts.getProperty("role", EMPTY_STRING).trim().toLowerCase(Locale.ROOT);
         final TagType type = tag.tagType;
-        // inside the article, an <aside> is a note or callout of the text; outside it is a sidebar
-        if (type == TagType.nav || BOILERPLATE_ROLES.contains(role)
-                || (!tag.main && (type == TagType.aside || type == TagType.header || type == TagType.footer || BANNER_ROLES.contains(role)))) {
+        // inside an <article>, an <aside> is a note or callout of the text; elsewhere (also beside the article in
+        // <main>) it is a sidebar
+        if (type == TagType.nav || BOILERPLATE_ROLES.contains(role) || (type == TagType.aside && !tag.article)
+                || (!tag.main && (type == TagType.header || type == TagType.footer || BANNER_ROLES.contains(role)))) {
             tag.boilerplate = true;
             return;
         }
-        if (type == TagType.div || type == TagType.span) {
+        if (type == TagType.div || type == TagType.span || type == TagType.aside) {
             final String classAttr = tag.opts.getProperty("class", EMPTY_STRING);
             if (!classAttr.isEmpty() && !Collections.disjoint(boilerplateClasses, ContentScraper.parseSpaceSeparatedTokens(classAttr))) {
                 tag.boilerplate = true;
@@ -558,6 +562,7 @@ public class ContentScraper extends AbstractScraper implements Scraper {
             }
         }
         if (type == TagType.main || type == TagType.article || "main".equals(role)) tag.main = true;
+        if (type == TagType.article) tag.article = true;
     }
 
     private final static Pattern protp = Pattern.compile("smb://|ftp://|http://|https://");

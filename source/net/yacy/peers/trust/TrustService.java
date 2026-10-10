@@ -184,9 +184,9 @@ public final class TrustService {
             if (ip == null && !s.isRelayed()) continue;
             // the address of a seed is not signed: only ask at an address where the key owner answered, so that a
             // seed cannot make this peer send requests to any host
-            final String base = s.getPublicURL(ip, false);
-            if (!ProvenAddresses.isProvenAt(s, base)) continue;
             try {
+                final String base = s.getPublicURL(ip, false); // throws for a relayed peer without a tunnel
+                if (!ProvenAddresses.isProvenAt(s, base)) continue;
                 final int n = importFrom(store, base + "/yacy/trust.json", "peer " + s.getName());
                 if (n <= 0) gossipBackoff.put(s.hash, now + GOSSIP_BACKOFF);
                 fetched++;

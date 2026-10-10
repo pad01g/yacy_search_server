@@ -248,6 +248,8 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
     /** clicks of the administrator on results of this query (local searches only), see {@link ClickStore} */
     private final Map<String, Integer> clicks;
     private final double clickWeight;
+    /** search.debug.ranking, read once per search */
+    private final boolean debugRanking;
     private final double thinExponent;
     public  final boolean excludeintext_image;
 
@@ -457,6 +459,8 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         final boolean text = this.query.contentdom == ContentDomain.TEXT || this.query.contentdom == ContentDomain.ALL;
         final Switchboard thinSb = Switchboard.getSwitchboard();
         this.thinWords = !text || thinSb == null ? 0 : thinSb.getConfigInt(SwitchboardConstants.SEARCH_RANKING_THIN_WORDS, SwitchboardConstants.SEARCH_RANKING_THIN_WORDS_DEFAULT);
+        // not for the searches of other peers: their result URLs show what their users searched for
+        this.debugRanking = thinSb != null && !query.servesRemotePeer() && thinSb.getConfigBool(SwitchboardConstants.SEARCH_DEBUG_RANKING, false);
         this.clickWeight = thinSb == null || query.servesRemotePeer() ? 0.0d
                 : thinSb.getConfigFloat(SwitchboardConstants.SEARCH_RANKING_CLICKS_WEIGHT, SwitchboardConstants.SEARCH_RANKING_CLICKS_WEIGHT_DEFAULT);
         this.clicks = this.clickWeight > 0 ? ClickStore.get().clicks(query.getQueryGoal().getQueryString(false)) : java.util.Collections.emptyMap();
@@ -2061,12 +2065,12 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         return Math.max(SwitchboardConstants.SEARCH_RANKING_THIN_FLOOR, Math.pow((double) words / thinWords, exponent));
     }
 
-    /** weight a ranking by {@link #thinWeight}; a lower weight lowers also a negative ranking */
     /** @return the ranking moved into a band below all Solr rankings (which are below 2^40), keeping the order */
     static long wordIndexBand(final long ranking) {
         return Math.max(-RANKING_LIMIT / 2, Math.min(1L << 40, ranking) - (1L << 41));
     }
 
+    /** weight a ranking by {@link #thinWeight}; a lower weight lowers also a negative ranking */
     static long thinRanking(final long ranking, final int words, final int thinWords, final double exponent) {
         final double w = thinWeight(words, thinWords, exponent);
         if (w >= 1.0d) return ranking;
@@ -2176,8 +2180,7 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         // TODO: verify and straighten the use of addTopic, getTopic and getTopicNavigator and related score calculation
         // final long ranking = ((long) (score * 128.f)) + postRanking(resultEntry, this.getTopicNavigator(MAX_TOPWORDS));
 
-        // not for the searches of other peers: their result URLs show what their users searched for
-        if (!this.query.servesRemotePeer() && Switchboard.getSwitchboard().getConfigBool("search.debug.ranking", false)) log.info("RANKDEBUG " + resultEntry.urlstring() + " score=" + score + " boost=" + rankingBoost + " raw=" + raw + " words=" + resultEntry.wordCountOrUnknown() + " ranking=" + ranking + " kw=" + resultEntry.getFieldValue(VectorSearch.FIELD_KEYWORD_MATCH) + " q=" + currentCandidateQuality(resultEntry) + " local=" + isLocalCandidate(resultEntry));
+        if (this.debugRanking) log.info("RANKDEBUG " + resultEntry.urlstring() + " score=" + score + " boost=" + rankingBoost + " raw=" + raw + " words=" + resultEntry.wordCountOrUnknown() + " ranking=" + ranking + " kw=" + resultEntry.getFieldValue(VectorSearch.FIELD_KEYWORD_MATCH) + " q=" + currentCandidateQuality(resultEntry) + " local=" + isLocalCandidate(resultEntry));
         resultEntry.setScore(ranking); // update the score of resultEntry for access by search interface / api
         this.resultList.put(new ReverseElement<>(resultEntry, ranking)); // remove smallest in case of overflow
         if (this.pollImmediately) this.resultList.poll(); // prevent re-ranking in case there is only a single index source which has already ranked entries.
@@ -2353,6 +2356,13 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
         return shortSnippetDefault ? 180 : SearchEvent.SNIPPET_MAX_LENGTH;
     }
 
+    /** the longest time a local search waits for its remaining results before the first is taken */
+    static final long LOCAL_RANKING_WAIT_MS = 2000;
+    /** the Solr batch (localsolroffset) whose results were ranked before the first of them was taken */
+    private int rankedSolrOffset = -1;
+    private volatile long rankingDeadline = 0;
+    private volatile boolean rankingDone = true;
+
     /**
      * This is the access point for the search interface to retrive ranked results.
      * for display.
@@ -2361,13 +2371,6 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
      * @param timeout
      * @return
      */
-    /** the longest time a local search waits for its remaining results before the first is taken */
-    static final long LOCAL_RANKING_WAIT_MS = 2000;
-    /** the Solr batch (localsolroffset) whose results were ranked before the first of them was taken */
-    private int rankedSolrOffset = -1;
-    private volatile long rankingDeadline = 0;
-    private volatile boolean rankingDone = true;
-
     public URIMetadataNode oneResult(final int item, final long timeout) {
         // check if we already retrieved this item
         // (happens if a search pages is accessed a second time)
@@ -2437,19 +2440,22 @@ public final class SearchEvent implements ScoreMapUpdatesListener {
                     this.rankingDone = false;
                 }
             }
-            while (!this.rankingDone && System.currentTimeMillis() < this.rankingDeadline) {
-                if (!drainer || !drainSolrStackToResult(true)) {
-                    // nothing could be taken: done when no feeder (Solr, word index, snippet thread) is still running
-                    if (drainer && this.isFeedingFinished() && this.nodeStack.sizeQueue() == 0) break;
-                    try {
-                        Thread.sleep(5);
-                    } catch (final InterruptedException e) {
-                        log.warn("Search results wait was interrupted.");
-                        break;
+            try {
+                while (!this.rankingDone && System.currentTimeMillis() < this.rankingDeadline) {
+                    if (!drainer || !drainSolrStackToResult(true)) {
+                        // nothing could be taken: done when no feeder (Solr, word index, snippet thread) is still running
+                        if (drainer && this.isFeedingFinished() && this.nodeStack.sizeQueue() == 0) break;
+                        try {
+                            Thread.sleep(5);
+                        } catch (final InterruptedException e) {
+                            log.warn("Search results wait was interrupted.");
+                            break;
+                        }
                     }
                 }
+            } finally {
+                if (drainer) this.rankingDone = true;
             }
-            if (drainer) this.rankingDone = true;
         }
         while ( this.resultList.sizeAvailable() <= resultListIndex &&
                 (this.rwiQueueSize() > 0 || this.nodeStack.sizeQueue() > 0 ||

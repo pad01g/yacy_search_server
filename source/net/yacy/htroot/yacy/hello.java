@@ -235,8 +235,6 @@ public final class hello {
                     backping_method = "reportedip=" + reportedip;
                     if (callback[0] >= 0) {
                     	success = true;
-                    	// the caller's other addresses are not signed: keep the one at which the key owner answered
-                    	remoteSeed.setOnlyIP(reportedip);
                     	break;
                     }
                     if (--callbackRemain <= 0) break; // no more tries left / restrict to a limited number of ips

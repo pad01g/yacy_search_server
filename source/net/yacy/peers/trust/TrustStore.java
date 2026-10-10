@@ -49,7 +49,7 @@ public final class TrustStore {
     public static final String BUNDLE_FILE = "DATA/SETTINGS/trust-bundle.json";
     /** stop storing envelopes beyond this number (protection against flooding) */
     static final int MAX_ENVELOPES = 512;
-    /** envelopes read from one bundle; a bundle of this peer's network holds at most MAX_ENVELOPES */
+    /** envelopes verified per bundle (only those of coordinators and delegated operators count) */
     static final int MAX_BUNDLE_ENVELOPES = 2 * MAX_ENVELOPES;
     static final int MAX_PEERS_PER_LIST = 10000;
     /** versions above this are rejected, so that sums of versions cannot overflow */
@@ -170,15 +170,15 @@ public final class TrustStore {
         // Only envelopes whose signer may be stored are verified (a bundle from a stranger may hold thousands of
         // self-signed envelopes): the coordinators' first, delegations before lists, so that the lists of newly
         // delegated operators are accepted in the same import; then the operators'.
-        if (candidates.size() > MAX_BUNDLE_ENVELOPES) candidates.subList(MAX_BUNDLE_ENVELOPES, candidates.size()).clear();
         final List<String> coords = this.coordinators.get();
-        int changed = 0;
+        int changed = 0, verified = 0;
         for (final boolean coordinatorRound : new boolean[] {true, false}) {
             final List<TrustEnvelope> parsed = new ArrayList<>();
             for (final JSONObject c : candidates) {
                 final String signer = canonicalKey(c.optString("signer", null));
                 if (signer == null || coords.contains(signer) != coordinatorRound) continue;
                 if (!coordinatorRound && !isDelegated(signer)) continue;
+                if (++verified > MAX_BUNDLE_ENVELOPES) break;
                 final TrustEnvelope e = TrustEnvelope.parse(c);
                 if (e != null) parsed.add(e);
             }

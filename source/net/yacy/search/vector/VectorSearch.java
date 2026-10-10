@@ -35,7 +35,7 @@ import net.yacy.search.ranking.VersionCollapse;
 
 /**
  * Vector search (docs/vector-search.md): settings, the query embedding, the k-nearest-neighbour Solr query and the
- * fusion of its result list with the keyword result list (reciprocal rank fusion).
+ * fusion of its result list with the keyword result list (search.vector.fusion: score, abs or rrf).
  */
 public final class VectorSearch {
 
@@ -178,17 +178,17 @@ public final class VectorSearch {
     }
 
     /**
-     * @return the embedding of a query, or null if the service is not available or does not answer within
-     *         {@link #QUERY_TIMEOUT_MS} (then the search uses keywords only; after a failure the service is not asked
-     *         again for 30 seconds, so searches do not wait for it)
-     */
-    /**
      * Wait for a query embedding at most this long. The keyword results are merged with the vector results before
      * they are ranked, and a local search ranks what arrived within SearchEvent.LOCAL_RANKING_WAIT_MS (2 s): a slower
      * answer (the service is busy embedding documents) would leave the keyword results out of the ranking.
      */
     static final long QUERY_TIMEOUT_MS = 1000;
 
+    /**
+     * @return the embedding of a query, or null if the service is not available or does not answer within
+     *         {@link #QUERY_TIMEOUT_MS} (then the search uses keywords only; after a failure the service is not asked
+     *         again for 30 seconds, so searches do not wait for it)
+     */
     public static float[] queryVector(final String query) {
         if (query == null || query.isBlank()) return null;
         final float[] cached = queryCache.get(query);
@@ -362,7 +362,7 @@ public final class VectorSearch {
         return ordered(docs, score, keyword.getNumFound(), limit, 1000.0);
     }
 
-    /** the fusion of search.vector.fusion: "score" (default) or "rrf" */
+    /** the fusion of search.vector.fusion: "score" (default), "abs" or "rrf" */
     public static SolrDocumentList fuse(final String mode, final SolrDocumentList keyword, final SolrDocumentList nearest, final float vectorWeight, final int limit) {
         if ("rrf".equals(mode)) return fuse(keyword, nearest, vectorWeight, limit);
         if ("abs".equals(mode)) {

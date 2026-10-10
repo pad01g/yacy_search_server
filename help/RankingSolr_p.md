@@ -55,6 +55,18 @@ These keys are set in `defaults/yacy.init` and can be changed with `/ConfigPrope
 | `search.ranking.thin.words` | `100` | Thin content: results with fewer words than this are weighted by (words / this value) ^ `search.ranking.thin.exponent`, at least 0.1. Title and h1 weigh much more than the text, so pages that repeat the query in the title but have little text (tag lists, doorway pages) would otherwise rank first. A page without text (0 words) gets the floor; a result without a word count (not delivered, or removed from a copy relayed by an untrusted peer) is weighted like a page of half this value. `0` switches it off. Applies to local and remote results of text searches. Documents indexed before this fork keep their old word count (CJK text counted as very few words) until they are re-indexed. |
 | `search.ranking.thin.exponent` | `1.0` | Exponent of the thin content weighting. |
 | `remotesearch.dht.minage` | `3` | Minimum age in days of a peer to be asked in a remote word index (DHT) search. |
+| `search.ranking.solr.textPhraseBoost` | `2` | Boost (edismax `bq`) for documents whose text contains the whole query as a phrase. Upstream used 10, which put pages that merely mention the phrase above the page about it. Sent to remote peers with the query. `0` switches it off. |
+| `search.language.mode` | `prefer` | What the language selected on the search page (`lr`, cookie) does: `prefer` ranks pages in other languages lower, `filter` leaves them out (upstream). The query modifier `/language/xx` always filters. |
+| `search.language.otherWeight` | `0.5` | With `prefer`: the score of pages in other languages is multiplied by this (0-1). |
+| `search.ranking.collapseVersions` | `true` | Local searches keep one page of a family of copies: URLs that differ only by a version directory (`v20.10`, `17`, `current`) not naming the page itself, or by `index.html` / a trailing slash, and that have the same title apart from numbers. |
+| `search.ranking.clicks.weight` | `0.5` | Results the administrator opened from the search page (`api/click_p.json`) rank higher for the same query, up to 1 + this weight (reached at 8 clicks). Local only, never sent to other peers. `0` switches recording and use off. |
+| `search.ranking.anchors.enabled` | `false` | Collect the anchor texts of links to each page into `anchors_in_txt` (searched with the boost in the boost fields). Each visit rewrites the whole Solr document. |
+| `search.ranking.anchors.refreshHours` | `168` | Collect the anchor texts of a page again after this many hours. |
+| `parser.html.mainContent` | `true` | Index the text of `<main>`/`<article>` (or without them, the page without navigation, sidebars, banners, footers); links there are still followed. Needs a re-crawl. |
+| `parser.html.boilerplateClasses` | (built in) | Further `class` names of `div`/`span`/`aside` elements that are page furniture, comma separated. |
+| `search.debug.ranking` | `false` | Log the score parts of each local result (`RANKDEBUG`). Not for the searches of other peers. |
+
+The vector search settings (`search.vector.*`) are described in `docs/vector-search.md`.
 
 The word count of a document (`wordcount_i`) counts a run of Chinese, Japanese or Korean characters as one word per two characters; it used to count spaces, which gave a whole CJK paragraph the count 1.
 

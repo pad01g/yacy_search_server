@@ -7,7 +7,7 @@
 
 Search Engine Software
 
-
+[![pad01g/yacy_search_server MCP server](https://glama.ai/mcp/servers/pad01g/yacy_search_server/badges/score.svg)](https://glama.ai/mcp/servers/pad01g/yacy_search_server)
 [![YaCy Home Page](https://img.shields.io/badge/YaCy%20Home%20Page-5090D0)](https://yacy.net)
 [![YaCy Discourse Forums](https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.searchlab.eu%2F&label=YaCy%20Discourse%20Forums)](https://community.searchlab.eu/)
 [![become a Github Sponsor](https://img.shields.io/badge/Become_a_Github_Sponsor-for_YaCy-green)](https://github.com/sponsors/Orbiter)
